@@ -146,6 +146,54 @@ func (d *DB) migrate() error {
 		FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE
 	);
 
+	-- Curated lists table
+	CREATE TABLE IF NOT EXISTS curated_lists (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		slug TEXT UNIQUE NOT NULL,
+		description TEXT,
+		sort_by TEXT DEFAULT 'rating',
+		order_by TEXT DEFAULT 'desc',
+		minimum_rating REAL DEFAULT 0,
+		maximum_rating REAL DEFAULT 10,
+		minimum_year INTEGER,
+		maximum_year INTEGER,
+		genre TEXT,
+		limit_count INTEGER DEFAULT 50,
+		is_active INTEGER DEFAULT 1,
+		display_order INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	-- Curated list movie associations (for hand-picked lists)
+	CREATE TABLE IF NOT EXISTS curated_list_movies (
+		list_id INTEGER NOT NULL,
+		movie_id INTEGER NOT NULL,
+		display_order INTEGER DEFAULT 0,
+		FOREIGN KEY (list_id) REFERENCES curated_lists(id) ON DELETE CASCADE,
+		FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+		PRIMARY KEY (list_id, movie_id)
+	);
+
+	-- Home sections table
+	CREATE TABLE IF NOT EXISTS home_sections (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		section_id TEXT UNIQUE NOT NULL,
+		title TEXT NOT NULL,
+		section_type TEXT NOT NULL DEFAULT 'query',
+		query_type TEXT,
+		genre TEXT,
+		curated_list_id INTEGER,
+		sort_by TEXT DEFAULT 'rating',
+		order_by TEXT DEFAULT 'desc',
+		minimum_rating REAL DEFAULT 0,
+		limit_count INTEGER DEFAULT 10,
+		is_active INTEGER DEFAULT 1,
+		display_order INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (curated_list_id) REFERENCES curated_lists(id) ON DELETE SET NULL
+	);
+
 	-- Create indexes
 	CREATE INDEX IF NOT EXISTS idx_movies_imdb ON movies(imdb_code);
 	CREATE INDEX IF NOT EXISTS idx_movies_year ON movies(year);
@@ -154,6 +202,7 @@ func (d *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_torrents_hash ON torrents(hash);
 	CREATE INDEX IF NOT EXISTS idx_series_imdb ON series(imdb_code);
 	CREATE INDEX IF NOT EXISTS idx_episodes_series ON episodes(series_id);
+	CREATE INDEX IF NOT EXISTS idx_home_sections_order ON home_sections(display_order);
 	`
 
 	_, err := d.Exec(schema)
@@ -174,6 +223,10 @@ func (d *DB) migrate() error {
 		"ALTER TABLE movies ADD COLUMN download_count INTEGER DEFAULT 0",
 		"ALTER TABLE movies ADD COLUMN ratings_updated_at TEXT",
 		"ALTER TABLE movies ADD COLUMN state TEXT DEFAULT 'ok'",
+		"ALTER TABLE movies ADD COLUMN franchise TEXT",
+		"ALTER TABLE movies ADD COLUMN imdb_votes TEXT",
+		"ALTER TABLE movies ADD COLUMN content_type TEXT DEFAULT 'movie'",
+		"ALTER TABLE movies ADD COLUMN provider TEXT",
 		// Series columns
 		"ALTER TABLE series ADD COLUMN tvdb_id INTEGER",
 		"ALTER TABLE series ADD COLUMN end_year INTEGER",
@@ -212,5 +265,4 @@ func (d *DB) migrate() error {
 	}
 
 	return nil
-	return err
 }

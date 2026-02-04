@@ -190,6 +190,77 @@ func (h *AdminHandler) DeleteMovie(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
+// UpdateMovie handles PUT /admin/api/movies/{id}
+func (h *AdminHandler) UpdateMovie(w http.ResponseWriter, r *http.Request) {
+	movieID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid movie ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get existing movie
+	movie, err := h.db.GetMovie(uint(movieID))
+	if err != nil {
+		http.Error(w, "Movie not found", http.StatusNotFound)
+		return
+	}
+
+	// Parse JSON body
+	var update struct {
+		ImdbCode         string  `json:"imdb_code"`
+		Title            string  `json:"title"`
+		Year             int     `json:"year"`
+		Rating           float64 `json:"rating"`
+		Runtime          int     `json:"runtime"`
+		Genres           string  `json:"genres"`
+		Language         string  `json:"language"`
+		Summary          string  `json:"summary"`
+		YtTrailerCode    string  `json:"yt_trailer_code"`
+		MediumCoverImage string  `json:"medium_cover_image"`
+		BackgroundImage  string  `json:"background_image"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Update fields
+	if update.ImdbCode != "" {
+		movie.ImdbCode = update.ImdbCode
+	}
+	if update.Title != "" {
+		movie.Title = update.Title
+		movie.Slug = strings.ToLower(strings.ReplaceAll(update.Title, " ", "-"))
+	}
+	if update.Year > 0 {
+		movie.Year = uint(update.Year)
+	}
+	movie.Rating = float32(update.Rating)
+	movie.Runtime = uint(update.Runtime)
+	if update.Genres != "" {
+		movie.Genres = strings.Split(update.Genres, ",")
+		for i := range movie.Genres {
+			movie.Genres[i] = strings.TrimSpace(movie.Genres[i])
+		}
+	}
+	if update.Language != "" {
+		movie.Language = update.Language
+	}
+	movie.Summary = update.Summary
+	movie.YtTrailerCode = update.YtTrailerCode
+	movie.MediumCoverImage = update.MediumCoverImage
+	movie.BackgroundImage = update.BackgroundImage
+
+	if err := h.db.UpdateMovie(movie); err != nil {
+		http.Error(w, "Failed to update movie: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(movie)
+}
+
 // UploadTorrent handles POST /admin/upload
 func (h *AdminHandler) UploadTorrent(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {

@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -32,6 +34,14 @@ func (a *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		// For API requests, return 401
+		if strings.HasPrefix(r.URL.Path, "/admin/api/") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			return
+		}
+
 		// Redirect to login
 		if r.URL.Path != "/admin/login" {
 			http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
@@ -42,7 +52,73 @@ func (a *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// Login handles POST /admin/login
+// CheckAuth handles GET /admin/api/auth/check - returns 200 if authenticated
+func (a *AuthMiddleware) CheckAuth(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session")
+	if err == nil && a.validateSession(cookie.Value) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"authenticated": true})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	json.NewEncoder(w).Encode(map[string]bool{"authenticated": false})
+}
+
+// LoginAPI handles POST /admin/api/login - JSON API login for SPA
+func (a *AuthMiddleware) LoginAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Password string `json:"password"`
+	}
+
+	// Try JSON body first
+	if r.Header.Get("Content-Type") == "application/json" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid request"})
+			return
+		}
+	} else {
+		// Form data
+		if err := r.ParseForm(); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid form"})
+			return
+		}
+		req.Password = r.FormValue("password")
+	}
+
+	// Constant-time comparison to prevent timing attacks
+	if subtle.ConstantTimeCompare([]byte(req.Password), []byte(a.password)) != 1 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid password"})
+		return
+	}
+
+	// Create session
+	sessionID := a.createSession()
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   86400 * 7, // 7 days
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// Login handles POST /admin/login (HTML form)
 func (a *AuthMiddleware) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		// Show login form
@@ -99,6 +175,13 @@ func (a *AuthMiddleware) Logout(w http.ResponseWriter, r *http.Request) {
 		Path:   "/",
 		MaxAge: -1,
 	})
+
+	// For API requests, return JSON
+	if r.Header.Get("Accept") == "application/json" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		return
+	}
 
 	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 }

@@ -30,6 +30,9 @@ func (h *APIHandler) ListMovies(w http.ResponseWriter, r *http.Request) {
 		Genre:         q.Get("genre"),
 		SortBy:        q.Get("sort_by"),
 		OrderBy:       q.Get("order_by"),
+		Year:          parseInt(q.Get("year"), 0),
+		MinimumYear:   parseInt(q.Get("minimum_year"), 0),
+		MaximumYear:   parseInt(q.Get("maximum_year"), 0),
 	}
 
 	movies, totalCount, err := h.db.ListMovies(filter)
@@ -73,6 +76,119 @@ func (h *APIHandler) MovieDetails(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeSuccess(w, data)
+}
+
+// HomeSectionResponse is the response format for home sections
+type HomeSectionResponse struct {
+	ID     string         `json:"id"`
+	Title  string         `json:"title"`
+	Type   string         `json:"type"`
+	Movies []models.Movie `json:"movies,omitempty"`
+}
+
+// Home handles GET /api/v2/home.json - returns home page content
+func (h *APIHandler) Home(w http.ResponseWriter, r *http.Request) {
+	var sections []HomeSectionResponse
+
+	// Get configured home sections from database
+	dbSections, err := h.db.ListHomeSections(false)
+	if err != nil || len(dbSections) == 0 {
+		// Fallback to default sections if none configured
+		sections = h.getDefaultHomeSections()
+	} else {
+		// Build sections from database config
+		for _, s := range dbSections {
+			var movies []models.Movie
+
+			switch s.SectionType {
+			case "recent":
+				movies, _, _ = h.db.ListMovies(database.MovieFilter{
+					Limit:   s.LimitCount,
+					Page:    1,
+					SortBy:  "date_uploaded",
+					OrderBy: "desc",
+				})
+			case "top_rated":
+				movies, _, _ = h.db.ListMovies(database.MovieFilter{
+					Limit:         s.LimitCount,
+					Page:          1,
+					MinimumRating: s.MinimumRating,
+					SortBy:        "rating",
+					OrderBy:       "desc",
+				})
+			case "genre":
+				movies, _, _ = h.db.ListMovies(database.MovieFilter{
+					Limit:         s.LimitCount,
+					Page:          1,
+					Genre:         s.Genre,
+					MinimumRating: s.MinimumRating,
+					SortBy:        s.SortBy,
+					OrderBy:       s.OrderBy,
+				})
+			case "curated_list":
+				if s.CuratedListID != nil {
+					list, err := h.db.GetCuratedListByID(*s.CuratedListID)
+					if err == nil {
+						movies, _ = h.db.GetCuratedListMovies(list)
+					}
+				}
+			case "query":
+				movies, _, _ = h.db.ListMovies(database.MovieFilter{
+					Limit:         s.LimitCount,
+					Page:          1,
+					MinimumRating: s.MinimumRating,
+					Genre:         s.Genre,
+					SortBy:        s.SortBy,
+					OrderBy:       s.OrderBy,
+				})
+			}
+
+			if len(movies) > 0 {
+				sections = append(sections, HomeSectionResponse{
+					ID:     s.SectionID,
+					Title:  s.Title,
+					Type:   s.SectionType,
+					Movies: movies,
+				})
+			}
+		}
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"sections": sections,
+	})
+}
+
+// getDefaultHomeSections returns fallback sections when none are configured
+func (h *APIHandler) getDefaultHomeSections() []HomeSectionResponse {
+	var sections []HomeSectionResponse
+
+	// Recently Added
+	recentMovies, _, _ := h.db.ListMovies(database.MovieFilter{
+		Limit: 10, Page: 1, SortBy: "date_uploaded", OrderBy: "desc",
+	})
+	if len(recentMovies) > 0 {
+		sections = append(sections, HomeSectionResponse{ID: "recently_added", Title: "Recently Added", Type: "recent", Movies: recentMovies})
+	}
+
+	// Top Rated
+	topRated, _, _ := h.db.ListMovies(database.MovieFilter{
+		Limit: 10, Page: 1, MinimumRating: 7.0, SortBy: "rating", OrderBy: "desc",
+	})
+	if len(topRated) > 0 {
+		sections = append(sections, HomeSectionResponse{ID: "top_rated", Title: "Top Rated", Type: "top_rated", Movies: topRated})
+	}
+
+	// Curated lists
+	curatedLists, _ := h.db.ListCuratedLists(false)
+	for _, list := range curatedLists {
+		movies, _ := h.db.GetCuratedListMovies(&list)
+		if len(movies) > 0 {
+			sections = append(sections, HomeSectionResponse{ID: "curated_" + list.Slug, Title: list.Name, Type: "curated_list", Movies: movies})
+		}
+	}
+
+	return sections
 }
 
 // MovieSuggestions handles GET /api/v2/movie_suggestions.json

@@ -31,10 +31,19 @@ type Movie struct {
 	DownloadCount           uint      `json:"download_count,omitempty"`
 	DateUploaded            string    `json:"date_uploaded"`
 	DateUploadedUnix        int64     `json:"date_uploaded_unix"`
+	// Content metadata
+	ContentType     string   `json:"content_type,omitempty"` // movie, etc.
+	Provider        string   `json:"provider,omitempty"`     // yts, etc.
+	CreatedAt       string   `json:"created_at,omitempty"`
 	// Ratings from external sources
-	ImdbRating      *float32 `json:"imdb_rating,omitempty"`
-	RottenTomatoes  *int     `json:"rotten_tomatoes,omitempty"`
-	Metacritic      *int     `json:"metacritic,omitempty"`
+	ImdbRating       *float32 `json:"imdb_rating,omitempty"`
+	ImdbVotes        string   `json:"imdb_votes,omitempty"`
+	RottenTomatoes   *int     `json:"rotten_tomatoes,omitempty"`
+	Metacritic       *int     `json:"metacritic,omitempty"`
+	RatingsUpdatedAt string   `json:"ratings_updated_at,omitempty"`
+	// Franchise/collection info
+	Franchise       string   `json:"franchise,omitempty"`
+	State           string   `json:"state,omitempty"`
 }
 
 type Cast struct {
