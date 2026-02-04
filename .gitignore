@@ -1,0 +1,29 @@
+# Binaries
+torrent-server
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Data
+data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Downloads
+downloads/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/

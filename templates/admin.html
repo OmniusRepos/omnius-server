@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Torrent Server Admin</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        h1 {
+            color: #e94560;
+            font-size: 1.8rem;
+        }
+
+        .header-actions a {
+            color: #eee;
+            text-decoration: none;
+            margin-left: 20px;
+        }
+
+        .header-actions a:hover {
+            color: #e94560;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            color: #e94560;
+            font-size: 2rem;
+            margin-bottom: 5px;
+        }
+
+        .stat-card p {
+            color: #888;
+        }
+
+        .card {
+            background: #16213e;
+            padding: 25px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+        }
+
+        .card h2 {
+            color: #e94560;
+            margin-bottom: 20px;
+            font-size: 1.3rem;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background: #0f3460;
+            color: #eee;
+            font-size: 1rem;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #e94560;
+        }
+
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        button {
+            background: #e94560;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #ff6b6b;
+        }
+
+        .btn-secondary {
+            background: #0f3460;
+            border: 1px solid #333;
+        }
+
+        .btn-secondary:hover {
+            background: #16213e;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+
+        th {
+            color: #e94560;
+            font-weight: 600;
+        }
+
+        tr:hover {
+            background: #0f3460;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .actions button, .actions a {
+            padding: 6px 12px;
+            font-size: 0.85rem;
+        }
+
+        .movie-poster {
+            width: 50px;
+            height: 75px;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+
+        .torrent-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-right: 5px;
+        }
+
+        .torrent-badge.quality-1080p { background: #28a745; }
+        .torrent-badge.quality-720p { background: #ffc107; color: #000; }
+        .torrent-badge.quality-2160p { background: #007bff; }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: #888;
+        }
+
+        .tab:hover, .tab.active {
+            color: #e94560;
+            border-bottom-color: #e94560;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #16213e;
+            padding: 30px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stats {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            table {
+                font-size: 0.9rem;
+            }
+
+            th, td {
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Torrent Server Admin</h1>
+            <div class="header-actions">
+                <a href="/manifest.json" target="_blank">Stremio Manifest</a>
+                <a href="/api/v2/list_movies.json" target="_blank">API</a>
+                <a href="/admin/logout">Logout</a>
+            </div>
+        </header>
+
+        <div class="stats">
+            <div class="stat-card">
+                <h3>{{.MovieCount}}</h3>
+                <p>Movies</p>
+            </div>
+            <div class="stat-card">
+                <h3>{{.SeriesCount}}</h3>
+                <p>Series</p>
+            </div>
+            <div class="stat-card">
+                <h3>{{if .Stats.active_torrents}}{{.Stats.active_torrents}}{{else}}0{{end}}</h3>
+                <p>Active Torrents</p>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="movies">Movies</div>
+            <div class="tab" data-tab="series">Series</div>
+            <div class="tab" data-tab="add-movie">Add Movie</div>
+            <div class="tab" data-tab="add-series">Add Series</div>
+        </div>
+
+        <div id="movies" class="tab-content active">
+            <div class="card">
+                <h2>Movies</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Poster</th>
+                            <th>Title</th>
+                            <th>Year</th>
+                            <th>Rating</th>
+                            <th>IMDB</th>
+                            <th>Torrents</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Movies}}
+                        <tr>
+                            <td>
+                                {{if .MediumCoverImage}}
+                                <img src="{{.MediumCoverImage}}" class="movie-poster" alt="{{.Title}}">
+                                {{else}}
+                                <div class="movie-poster" style="background:#333;"></div>
+                                {{end}}
+                            </td>
+                            <td>{{.Title}}</td>
+                            <td>{{.Year}}</td>
+                            <td>{{.Rating}}</td>
+                            <td><a href="https://imdb.com/title/{{.ImdbCode}}" target="_blank">{{.ImdbCode}}</a></td>
+                            <td>
+                                {{range .Torrents}}
+                                <span class="torrent-badge quality-{{.Quality}}">{{.Quality}}</span>
+                                {{end}}
+                            </td>
+                            <td class="actions">
+                                <button onclick="openAddTorrentModal({{.ID}})" class="btn-secondary">+ Torrent</button>
+                                <button onclick="deleteMovie({{.ID}})" class="btn-danger">Delete</button>
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="series" class="tab-content">
+            <div class="card">
+                <h2>Series</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Poster</th>
+                            <th>Title</th>
+                            <th>Year</th>
+                            <th>Seasons</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Series}}
+                        <tr>
+                            <td>
+                                {{if .PosterImage}}
+                                <img src="{{.PosterImage}}" class="movie-poster" alt="{{.Title}}">
+                                {{else}}
+                                <div class="movie-poster" style="background:#333;"></div>
+                                {{end}}
+                            </td>
+                            <td>{{.Title}}</td>
+                            <td>{{.Year}}</td>
+                            <td>{{.TotalSeasons}}</td>
+                            <td>{{.Status}}</td>
+                            <td class="actions">
+                                <button class="btn-secondary">Manage</button>
+                                <button class="btn-danger">Delete</button>
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="add-movie" class="tab-content">
+            <div class="card">
+                <h2>Add Movie</h2>
+                <form method="POST" action="/admin/movies">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>IMDB Code</label>
+                            <input name="imdb_code" placeholder="tt1234567" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Title</label>
+                            <input name="title" placeholder="Movie Title" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Year</label>
+                            <input name="year" type="number" placeholder="2024">
+                        </div>
+                        <div class="form-group">
+                            <label>Rating</label>
+                            <input name="rating" type="number" step="0.1" min="0" max="10" placeholder="7.5">
+                        </div>
+                        <div class="form-group">
+                            <label>Runtime (minutes)</label>
+                            <input name="runtime" type="number" placeholder="120">
+                        </div>
+                        <div class="form-group">
+                            <label>Language</label>
+                            <input name="language" placeholder="en" value="en">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Genres (comma separated)</label>
+                            <input name="genres" placeholder="Action, Drama, Thriller">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Summary</label>
+                            <textarea name="summary" placeholder="Movie summary..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Cover Image URL</label>
+                            <input name="medium_cover_image" placeholder="https://...">
+                        </div>
+                        <div class="form-group">
+                            <label>Background Image URL</label>
+                            <input name="background_image" placeholder="https://...">
+                        </div>
+                        <div class="form-group">
+                            <label>YouTube Trailer Code</label>
+                            <input name="yt_trailer_code" placeholder="dQw4w9WgXcQ">
+                        </div>
+                    </div>
+                    <button type="submit">Add Movie</button>
+                </form>
+            </div>
+        </div>
+
+        <div id="add-series" class="tab-content">
+            <div class="card">
+                <h2>Add Series</h2>
+                <form method="POST" action="/admin/series">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>IMDB Code</label>
+                            <input name="imdb_code" placeholder="tt1234567" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Title</label>
+                            <input name="title" placeholder="Series Title" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Year</label>
+                            <input name="year" type="number" placeholder="2024">
+                        </div>
+                        <div class="form-group">
+                            <label>Total Seasons</label>
+                            <input name="total_seasons" type="number" placeholder="5">
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select name="status">
+                                <option value="ongoing">Ongoing</option>
+                                <option value="ended">Ended</option>
+                            </select>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Summary</label>
+                            <textarea name="summary" placeholder="Series summary..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Poster Image URL</label>
+                            <input name="poster_image" placeholder="https://...">
+                        </div>
+                    </div>
+                    <button type="submit">Add Series</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Torrent Modal -->
+    <div id="addTorrentModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add Torrent</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <form method="POST" id="addTorrentForm">
+                <div class="form-group">
+                    <label>Magnet Link or Hash</label>
+                    <input name="magnet" placeholder="magnet:?xt=urn:btih:... or hash">
+                </div>
+                <div class="form-group">
+                    <label>Quality</label>
+                    <select name="quality">
+                        <option value="2160p">2160p (4K)</option>
+                        <option value="1080p" selected>1080p</option>
+                        <option value="720p">720p</option>
+                        <option value="480p">480p</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Type</label>
+                    <select name="type">
+                        <option value="web">Web</option>
+                        <option value="bluray">BluRay</option>
+                        <option value="hdtv">HDTV</option>
+                        <option value="webrip">WebRip</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Size</label>
+                    <input name="size" placeholder="1.5 GB">
+                </div>
+                <button type="submit">Add Torrent</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        // Modal functions
+        function openAddTorrentModal(movieId) {
+            document.getElementById('addTorrentForm').action = '/admin/movies/' + movieId + '/torrent';
+            document.getElementById('addTorrentModal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('addTorrentModal').classList.remove('active');
+        }
+
+        // Close modal on outside click
+        document.getElementById('addTorrentModal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeModal();
+        });
+
+        // Delete movie
+        function deleteMovie(id) {
+            if (confirm('Are you sure you want to delete this movie?')) {
+                fetch('/admin/movies/' + id, { method: 'DELETE' })
+                    .then(() => location.reload());
+            }
+        }
+    </script>
+</body>
+</html>
