@@ -16,7 +16,7 @@ func Load() *Config {
 	return &Config{
 		Port:          getEnv("PORT", "8080"),
 		AdminPassword: getEnv("ADMIN_PASSWORD", "changeme"),
-		DatabasePath:  getEnv("DATABASE_PATH", "./data/torrents.db"),
+		DatabasePath:  getEnv("DATABASE_PATH", "./torrents.db"),
 		DownloadDir:   getEnv("DOWNLOAD_DIR", "./data/downloads"),
 		OmdbAPIKey:    getEnv("OMDB_API_KEY", ""),
 	}
