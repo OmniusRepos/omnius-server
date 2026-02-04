@@ -84,6 +84,35 @@ func (h *SeriesHandler) SeriesDetails(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, data)
 }
 
+// SeasonEpisodes handles GET /api/v2/season_episodes.json
+func (h *SeriesHandler) SeasonEpisodes(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	seriesID := parseInt(q.Get("series_id"), 0)
+	if seriesID == 0 {
+		writeError(w, "series_id is required")
+		return
+	}
+
+	season := parseInt(q.Get("season"), 0)
+	if season == 0 {
+		writeError(w, "season is required")
+		return
+	}
+
+	episodes, err := h.db.GetEpisodes(uint(seriesID), season)
+	if err != nil {
+		writeError(w, "Failed to fetch episodes: "+err.Error())
+		return
+	}
+
+	if episodes == nil {
+		episodes = []models.Episode{}
+	}
+
+	writeSuccess(w, episodes)
+}
+
 // AddSeries handles POST /admin/series
 func (h *SeriesHandler) AddSeries(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -144,13 +173,12 @@ func (h *SeriesHandler) AddEpisode(w http.ResponseWriter, r *http.Request) {
 	episodeNum, _ := strconv.Atoi(r.FormValue("episode"))
 
 	episode := &models.Episode{
-		SeriesID: uint(seriesID),
-		Season:   uint(season),
-		Episode:  uint(episodeNum),
-		Title:    r.FormValue("title"),
-		Overview: r.FormValue("overview"),
-		AirDate:  r.FormValue("air_date"),
-		ImdbCode: r.FormValue("imdb_code"),
+		SeriesID:      uint(seriesID),
+		SeasonNumber:  uint(season),
+		EpisodeNumber: uint(episodeNum),
+		Title:         r.FormValue("title"),
+		Summary:       r.FormValue("summary"),
+		AirDate:       r.FormValue("air_date"),
 	}
 
 	if err := h.db.CreateEpisode(episode); err != nil {
@@ -197,14 +225,15 @@ func (h *SeriesHandler) AddEpisodeTorrent(w http.ResponseWriter, r *http.Request
 	peers, _ := strconv.Atoi(r.FormValue("peers"))
 
 	torrent := &models.EpisodeTorrent{
-		EpisodeID: uint(episodeID),
-		Hash:      strings.ToUpper(hash),
-		Quality:   r.FormValue("quality"),
-		Seeds:     uint(seeds),
-		Peers:     uint(peers),
-		Size:      r.FormValue("size"),
-		SizeBytes: sizeBytes,
-		Source:    r.FormValue("source"),
+		EpisodeID:    uint(episodeID),
+		Hash:         strings.ToUpper(hash),
+		Quality:      r.FormValue("quality"),
+		VideoCodec:   r.FormValue("video_codec"),
+		Seeds:        uint(seeds),
+		Peers:        uint(peers),
+		Size:         r.FormValue("size"),
+		SizeBytes:    sizeBytes,
+		ReleaseGroup: r.FormValue("release_group"),
 	}
 
 	if torrent.Quality == "" {

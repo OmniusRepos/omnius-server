@@ -157,5 +157,60 @@ func (d *DB) migrate() error {
 	`
 
 	_, err := d.Exec(schema)
+	if err != nil {
+		return err
+	}
+
+	// Add new columns to existing tables (ignore errors if columns already exist)
+	migrations := []string{
+		// Movie rating columns
+		"ALTER TABLE movies ADD COLUMN imdb_rating REAL",
+		"ALTER TABLE movies ADD COLUMN rotten_tomatoes INTEGER",
+		"ALTER TABLE movies ADD COLUMN metacritic INTEGER",
+		"ALTER TABLE movies ADD COLUMN mpa_rating TEXT",
+		"ALTER TABLE movies ADD COLUMN url TEXT",
+		"ALTER TABLE movies ADD COLUMN background_image_original TEXT",
+		"ALTER TABLE movies ADD COLUMN like_count INTEGER DEFAULT 0",
+		"ALTER TABLE movies ADD COLUMN download_count INTEGER DEFAULT 0",
+		"ALTER TABLE movies ADD COLUMN ratings_updated_at TEXT",
+		"ALTER TABLE movies ADD COLUMN state TEXT DEFAULT 'ok'",
+		// Series columns
+		"ALTER TABLE series ADD COLUMN tvdb_id INTEGER",
+		"ALTER TABLE series ADD COLUMN end_year INTEGER",
+		"ALTER TABLE series ADD COLUMN runtime INTEGER DEFAULT 0",
+		"ALTER TABLE series ADD COLUMN network TEXT",
+		"ALTER TABLE series ADD COLUMN total_episodes INTEGER DEFAULT 0",
+		"ALTER TABLE series ADD COLUMN imdb_rating REAL",
+		"ALTER TABLE series ADD COLUMN rotten_tomatoes INTEGER",
+		// Episode columns
+		"ALTER TABLE episodes ADD COLUMN summary TEXT",
+		"ALTER TABLE episodes ADD COLUMN runtime INTEGER",
+		"ALTER TABLE episodes ADD COLUMN still_image TEXT",
+		// Episode torrent columns
+		"ALTER TABLE episode_torrents ADD COLUMN series_id INTEGER",
+		"ALTER TABLE episode_torrents ADD COLUMN season_number INTEGER",
+		"ALTER TABLE episode_torrents ADD COLUMN episode_number INTEGER",
+		"ALTER TABLE episode_torrents ADD COLUMN video_codec TEXT",
+		"ALTER TABLE episode_torrents ADD COLUMN release_group TEXT",
+		"ALTER TABLE episode_torrents ADD COLUMN date_uploaded TEXT",
+		"ALTER TABLE episode_torrents ADD COLUMN date_uploaded_unix INTEGER",
+		// Seasons table
+		`CREATE TABLE IF NOT EXISTS seasons (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			series_id INTEGER NOT NULL,
+			season_number INTEGER NOT NULL,
+			episode_count INTEGER DEFAULT 0,
+			air_date TEXT,
+			poster_image TEXT,
+			FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE,
+			UNIQUE(series_id, season_number)
+		)`,
+	}
+
+	for _, m := range migrations {
+		d.Exec(m) // Ignore errors (column may already exist)
+	}
+
+	return nil
 	return err
 }

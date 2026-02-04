@@ -117,7 +117,7 @@ func (s *SyncService) SyncEpisode(series *models.Series, season, episode int) er
 	episodes, _ := s.db.GetEpisodes(series.ID, season)
 	var ep *models.Episode
 	for i := range episodes {
-		if episodes[i].Episode == uint(episode) {
+		if episodes[i].EpisodeNumber == uint(episode) {
 			ep = &episodes[i]
 			break
 		}
@@ -125,9 +125,9 @@ func (s *SyncService) SyncEpisode(series *models.Series, season, episode int) er
 
 	if ep == nil {
 		ep = &models.Episode{
-			SeriesID: series.ID,
-			Season:   uint(season),
-			Episode:  uint(episode),
+			SeriesID:      series.ID,
+			SeasonNumber:  uint(season),
+			EpisodeNumber: uint(episode),
 		}
 		if err := s.db.CreateEpisode(ep); err != nil {
 			return err

@@ -299,3 +299,30 @@ func (d *DB) GetMovieSuggestions(movieID uint, limit int) ([]models.Movie, error
 
 	return movies, nil
 }
+
+// GetMovieRating returns the rating info for a movie by IMDB code
+func (d *DB) GetMovieRating(imdbCode string) (*models.LocalRating, error) {
+	var rating, imdbRating float32
+	var rottenTomatoes, metacritic int
+
+	err := d.QueryRow(`
+		SELECT rating, COALESCE(imdb_rating, rating), COALESCE(rotten_tomatoes, 0), COALESCE(metacritic, 0)
+		FROM movies WHERE imdb_code = $1
+	`, imdbCode).Scan(&rating, &imdbRating, &rottenTomatoes, &metacritic)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &models.LocalRating{}
+	if imdbRating > 0 {
+		result.ImdbRating = &imdbRating
+	}
+	if rottenTomatoes > 0 {
+		result.RottenTomatoes = &rottenTomatoes
+	}
+	if metacritic > 0 {
+		result.Metacritic = &metacritic
+	}
+
+	return result, nil
+}

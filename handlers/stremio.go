@@ -135,7 +135,7 @@ func (h *StremioHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if err == nil && series != nil {
 				episodes, _ := h.db.GetEpisodes(series.ID, season)
 				for _, ep := range episodes {
-					if ep.Episode == uint(episode) {
+					if ep.EpisodeNumber == uint(episode) {
 						for _, t := range ep.Torrents {
 							streams = append(streams, models.StremioStream{
 								InfoHash: t.Hash,

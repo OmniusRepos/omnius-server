@@ -85,11 +85,29 @@ func main() {
 	// Health check
 	r.Get("/health", streamHandler.Health)
 
+	// Initialize ratings handler
+	ratingsHandler := handlers.NewRatingsHandler(db)
+
+	// Initialize series handler
+	seriesHandler := handlers.NewSeriesHandler(db)
+
 	// YTS-compatible API (public)
 	r.Route("/api/v2", func(r chi.Router) {
+		// Movies
 		r.Get("/list_movies.json", apiHandler.ListMovies)
 		r.Get("/movie_details.json", apiHandler.MovieDetails)
 		r.Get("/movie_suggestions.json", apiHandler.MovieSuggestions)
+
+		// Series
+		r.Get("/list_series.json", seriesHandler.ListSeries)
+		r.Get("/series_details.json", seriesHandler.SeriesDetails)
+		r.Get("/season_episodes.json", seriesHandler.SeasonEpisodes)
+
+		// Ratings & Sync
+		r.Post("/get_ratings", ratingsHandler.GetRatings)
+		r.Post("/sync_movie", ratingsHandler.SyncMovie)
+		r.Post("/sync_movies", ratingsHandler.SyncMovies)
+		r.Get("/torrent_stats", ratingsHandler.TorrentStats)
 	})
 
 	// Stremio addon (public)

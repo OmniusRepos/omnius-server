@@ -41,14 +41,14 @@ func (r TorrentResult) ToMovieTorrent(movieID uint) *models.Torrent {
 // ToEpisodeTorrent converts TorrentResult to models.EpisodeTorrent
 func (r TorrentResult) ToEpisodeTorrent(episodeID uint) *models.EpisodeTorrent {
 	return &models.EpisodeTorrent{
-		EpisodeID: episodeID,
-		Hash:      r.Hash,
-		Quality:   r.Quality,
-		Seeds:     r.Seeds,
-		Peers:     r.Peers,
-		Size:      r.Size,
-		SizeBytes: r.SizeBytes,
-		Source:    r.Source,
+		EpisodeID:    episodeID,
+		Hash:         r.Hash,
+		Quality:      r.Quality,
+		Seeds:        r.Seeds,
+		Peers:        r.Peers,
+		Size:         r.Size,
+		SizeBytes:    r.SizeBytes,
+		ReleaseGroup: r.Source, // Use Source as release group
 	}
 }
 

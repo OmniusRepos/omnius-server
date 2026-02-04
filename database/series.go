@@ -136,7 +136,7 @@ func (d *DB) CreateSeries(s *models.Series) error {
 
 func (d *DB) GetEpisodes(seriesID uint, season int) ([]models.Episode, error) {
 	query := `
-		SELECT id, series_id, season, episode, title, overview, air_date, imdb_code
+		SELECT id, series_id, season, episode, title, COALESCE(summary, overview, ''), air_date, runtime, still_image
 		FROM episodes WHERE series_id = $1
 	`
 	args := []interface{}{seriesID}
@@ -156,17 +156,22 @@ func (d *DB) GetEpisodes(seriesID uint, season int) ([]models.Episode, error) {
 	var episodes []models.Episode
 	for rows.Next() {
 		var e models.Episode
-		var title, overview, airDate, imdbCode sql.NullString
+		var title, summary, airDate, stillImage sql.NullString
+		var runtime sql.NullInt64
 
-		err := rows.Scan(&e.ID, &e.SeriesID, &e.Season, &e.Episode, &title, &overview, &airDate, &imdbCode)
+		err := rows.Scan(&e.ID, &e.SeriesID, &e.SeasonNumber, &e.EpisodeNumber, &title, &summary, &airDate, &runtime, &stillImage)
 		if err != nil {
 			continue
 		}
 
 		e.Title = title.String
-		e.Overview = overview.String
+		e.Summary = summary.String
 		e.AirDate = airDate.String
-		e.ImdbCode = imdbCode.String
+		if runtime.Valid {
+			r := uint(runtime.Int64)
+			e.Runtime = &r
+		}
+		e.StillImage = stillImage.String
 
 		// Load torrents
 		torrents, _ := d.GetEpisodeTorrents(e.ID)
@@ -180,14 +185,15 @@ func (d *DB) GetEpisodes(seriesID uint, season int) ([]models.Episode, error) {
 
 func (d *DB) CreateEpisode(e *models.Episode) error {
 	result, err := d.Exec(`
-		INSERT INTO episodes (series_id, season, episode, title, overview, air_date, imdb_code)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO episodes (series_id, season, episode, title, summary, air_date, runtime, still_image)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT(series_id, season, episode) DO UPDATE SET
 			title = excluded.title,
-			overview = excluded.overview,
+			summary = excluded.summary,
 			air_date = excluded.air_date,
-			imdb_code = excluded.imdb_code
-	`, e.SeriesID, e.Season, e.Episode, e.Title, e.Overview, e.AirDate, e.ImdbCode)
+			runtime = excluded.runtime,
+			still_image = excluded.still_image
+	`, e.SeriesID, e.SeasonNumber, e.EpisodeNumber, e.Title, e.Summary, e.AirDate, e.Runtime, e.StillImage)
 	if err != nil {
 		return err
 	}
@@ -202,7 +208,9 @@ func (d *DB) CreateEpisode(e *models.Episode) error {
 
 func (d *DB) GetEpisodeTorrents(episodeID uint) ([]models.EpisodeTorrent, error) {
 	rows, err := d.Query(`
-		SELECT id, episode_id, hash, quality, seeds, peers, size, size_bytes, source
+		SELECT id, episode_id, COALESCE(series_id, 0), COALESCE(season_number, 0), COALESCE(episode_number, 0),
+		       hash, quality, video_codec, seeds, peers, size, size_bytes, release_group,
+		       COALESCE(date_uploaded, ''), COALESCE(date_uploaded_unix, 0)
 		FROM episode_torrents WHERE episode_id = $1
 	`, episodeID)
 	if err != nil {
@@ -213,16 +221,20 @@ func (d *DB) GetEpisodeTorrents(episodeID uint) ([]models.EpisodeTorrent, error)
 	var torrents []models.EpisodeTorrent
 	for rows.Next() {
 		var t models.EpisodeTorrent
-		var quality, size, source sql.NullString
+		var quality, videoCodec, size, releaseGroup, dateUploaded sql.NullString
 
-		err := rows.Scan(&t.ID, &t.EpisodeID, &t.Hash, &quality, &t.Seeds, &t.Peers, &size, &t.SizeBytes, &source)
+		err := rows.Scan(&t.ID, &t.EpisodeID, &t.SeriesID, &t.SeasonNumber, &t.EpisodeNumber,
+			&t.Hash, &quality, &videoCodec, &t.Seeds, &t.Peers, &size, &t.SizeBytes, &releaseGroup,
+			&dateUploaded, &t.DateUploadedUnix)
 		if err != nil {
 			continue
 		}
 
 		t.Quality = quality.String
+		t.VideoCodec = videoCodec.String
 		t.Size = size.String
-		t.Source = source.String
+		t.ReleaseGroup = releaseGroup.String
+		t.DateUploaded = dateUploaded.String
 
 		torrents = append(torrents, t)
 	}
@@ -232,9 +244,13 @@ func (d *DB) GetEpisodeTorrents(episodeID uint) ([]models.EpisodeTorrent, error)
 
 func (d *DB) CreateEpisodeTorrent(t *models.EpisodeTorrent) error {
 	result, err := d.Exec(`
-		INSERT INTO episode_torrents (episode_id, hash, quality, seeds, peers, size, size_bytes, source)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, t.EpisodeID, t.Hash, t.Quality, t.Seeds, t.Peers, t.Size, t.SizeBytes, t.Source)
+		INSERT INTO episode_torrents (episode_id, series_id, season_number, episode_number, hash, quality,
+		                              video_codec, seeds, peers, size, size_bytes, release_group,
+		                              date_uploaded, date_uploaded_unix)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+	`, t.EpisodeID, t.SeriesID, t.SeasonNumber, t.EpisodeNumber, t.Hash, t.Quality,
+		t.VideoCodec, t.Seeds, t.Peers, t.Size, t.SizeBytes, t.ReleaseGroup,
+		t.DateUploaded, t.DateUploadedUnix)
 	if err != nil {
 		return err
 	}
