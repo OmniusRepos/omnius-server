@@ -26,3 +26,4 @@ Thumbs.db
 
 # Go
 vendor/
+data/omnius.db
