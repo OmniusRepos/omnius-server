@@ -1,4 +1,4 @@
-name: torrent-server
+name: omnius
 server: bp.common.al
 port: 8080
 build:
