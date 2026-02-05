@@ -1,0 +1,6 @@
+# SQLite WAL files (temporary)
+*.db-shm
+*.db-wal
+
+# Downloads folder
+downloads/

@@ -5,9 +5,8 @@ torrent-server
 *.so
 *.dylib
 
-# Data
-data/
-*.db
+# Data - track db but not WAL files
+data/downloads/
 *.db-journal
 *.db-shm
 *.db-wal
