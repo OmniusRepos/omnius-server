@@ -77,13 +77,14 @@ type EpisodeTorrent struct {
 	Peers          uint   `json:"peers"`
 	Size           string `json:"size"`
 	SizeBytes      uint64 `json:"size_bytes"`
+	FileIndex      int    `json:"file_index"`
 	ReleaseGroup   string `json:"release_group,omitempty"`
 	DateUploaded   string `json:"date_uploaded"`
 	DateUploadedUnix int64 `json:"date_uploaded_unix"`
 }
 
 type SeasonPack struct {
-	ID        uint   `json:"-"`
+	ID        uint   `json:"id"`
 	SeriesID  uint   `json:"series_id"`
 	Season    uint   `json:"season"`
 	Hash      string `json:"hash"`

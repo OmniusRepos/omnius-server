@@ -154,11 +154,19 @@ export interface Series {
   id: number;
   imdb_code: string;
   title: string;
+  title_slug?: string;
   year: number;
   rating: number;
+  runtime?: number;
+  genres?: string[];
+  summary?: string;
   total_seasons: number;
+  total_episodes?: number;
   status: string;
+  network?: string;
   poster_image?: string;
+  background_image?: string;
+  date_added?: string;
 }
 
 export async function getSeries(params?: { page?: number; limit?: number; search?: string }) {
@@ -171,6 +179,85 @@ export async function getSeries(params?: { page?: number; limit?: number; search
     `${PUBLIC_API}/list_series.json?${query}`
   );
   return { series: res.data.series || [], total: res.data.series_count };
+}
+
+export interface Episode {
+  id: number;
+  series_id: number;
+  season_number: number;
+  episode_number: number;
+  title: string;
+  summary?: string;
+  air_date?: string;
+  runtime?: number;
+  still_image?: string;
+  torrents?: EpisodeTorrent[];
+}
+
+export interface EpisodeTorrent {
+  id: number;
+  episode_id: number;
+  hash: string;
+  quality: string;
+  seeds: number;
+  peers: number;
+  size: string;
+}
+
+export interface SeasonPack {
+  id: number;
+  series_id: number;
+  season: number;
+  hash: string;
+  quality: string;
+  seeds: number;
+  peers: number;
+  size: string;
+  size_bytes: number;
+}
+
+export interface SeriesDetails extends Series {
+  episodes?: Episode[];
+  season_packs?: SeasonPack[];
+}
+
+export async function getSeriesDetails(id: number, withEpisodes = true): Promise<SeriesDetails> {
+  const res = await request<{ status: string; data: { series: Series; episodes: Episode[]; season_packs: SeasonPack[] } }>(
+    `${PUBLIC_API}/series_details.json?series_id=${id}&with_episodes=${withEpisodes}`
+  );
+  return {
+    ...res.data.series,
+    episodes: res.data.episodes || [],
+    season_packs: res.data.season_packs || [],
+  };
+}
+
+export async function getSeriesByIMDB(imdbCode: string) {
+  return request<{ exists: boolean; series?: Series }>(`${API_BASE}/series/by-imdb/${imdbCode}`);
+}
+
+export async function deleteSeries(id: number) {
+  return request(`${API_BASE}/series/${id}`, { method: 'DELETE' });
+}
+
+export async function updateSeries(id: number, data: Partial<{
+  imdb_code: string;
+  title: string;
+  year: number;
+  rating: number;
+  runtime: number;
+  genres: string;
+  summary: string;
+  poster_image: string;
+  background_image: string;
+  total_seasons: number;
+  status: string;
+  network: string;
+}>) {
+  return request<Series>(`${API_BASE}/series/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
 }
 
 // Curated Lists

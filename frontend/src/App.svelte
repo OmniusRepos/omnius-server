@@ -10,6 +10,7 @@
   import Movies from './routes/Movies.svelte';
   import MovieDetail from './routes/MovieDetail.svelte';
   import TVShows from './routes/TVShows.svelte';
+  import TVShowDetail from './routes/TVShowDetail.svelte';
   import Channels from './routes/Channels.svelte';
   import Curated from './routes/Curated.svelte';
   import ApiDocs from './routes/ApiDocs.svelte';
@@ -44,6 +45,7 @@
     '/movies': Movies,
     '/movies/:id': MovieDetail,
     '/tvshows': TVShows,
+    '/tvshows/:id': TVShowDetail,
     '/channels': Channels,
     '/curated': Curated,
     '/api-docs': ApiDocs,

@@ -190,3 +190,83 @@ func ParseSeasonEpisode(filename string) (season, episode int) {
 	}
 	return
 }
+
+// EZTVSeriesResult contains torrent info with season/episode
+type EZTVSeriesResult struct {
+	Title     string
+	Hash      string
+	MagnetURL string
+	Quality   string
+	Season    int
+	Episode   int
+	Seeds     int
+	Peers     int
+	Size      string
+	SizeBytes uint64
+}
+
+// FetchEZTVTorrents fetches all torrents for a series by IMDB ID
+func FetchEZTVTorrents(imdbID string) ([]EZTVSeriesResult, error) {
+	// Remove 'tt' prefix if present
+	imdbID = strings.TrimPrefix(imdbID, "tt")
+
+	params := url.Values{}
+	params.Set("imdb_id", imdbID)
+	params.Set("limit", "100")
+	params.Set("page", "1")
+
+	var allResults []EZTVSeriesResult
+
+	// Fetch multiple pages
+	for page := 1; page <= 5; page++ {
+		params.Set("page", strconv.Itoa(page))
+
+		resp, err := http.Get("https://eztvx.to/api/get-torrents?" + params.Encode())
+		if err != nil {
+			return nil, fmt.Errorf("EZTV request failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		var eztvResp eztvResponse
+		if err := json.NewDecoder(resp.Body).Decode(&eztvResp); err != nil {
+			return nil, fmt.Errorf("EZTV decode failed: %w", err)
+		}
+
+		if len(eztvResp.Torrents) == 0 {
+			break
+		}
+
+		for _, t := range eztvResp.Torrents {
+			season, episode := ParseSeasonEpisode(t.Filename)
+			if season == 0 && t.Season != "" {
+				season, _ = strconv.Atoi(t.Season)
+			}
+			if episode == 0 && t.Episode != "" {
+				episode, _ = strconv.Atoi(t.Episode)
+			}
+
+			quality := detectQuality(t.Filename)
+			sizeBytes, _ := strconv.ParseUint(t.SizeBytes, 10, 64)
+
+			allResults = append(allResults, EZTVSeriesResult{
+				Title:     t.Title,
+				Hash:      t.Hash,
+				MagnetURL: t.MagnetURL,
+				Quality:   quality,
+				Season:    season,
+				Episode:   episode,
+				Seeds:     t.Seeds,
+				Peers:     t.Peers,
+				Size:      formatSize(sizeBytes),
+				SizeBytes: sizeBytes,
+			})
+		}
+
+		// If we got less than limit, no more pages
+		if len(eztvResp.Torrents) < 100 {
+			break
+		}
+	}
+
+	return allResults, nil
+}

@@ -274,14 +274,14 @@
         <div class="sync-item">
           <div class="sync-info">
             <span class="sync-title">TV Shows</span>
-            <span class="sync-desc">Refresh all TV show metadata</span>
+            <span class="sync-desc">Refresh all TV show metadata from IMDB + torrents from EZTV</span>
           </div>
           <button
-            class="btn btn-secondary"
+            class="btn btn-primary"
             onclick={refreshAllShows}
-            disabled={true}
+            disabled={refreshingShows}
           >
-            Coming Soon
+            {refreshingShows ? 'Starting...' : 'Refresh All TV Shows'}
           </button>
         </div>
       </div>

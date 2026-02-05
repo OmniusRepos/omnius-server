@@ -190,6 +190,7 @@ func main() {
 		r.Post("/sync_movies", ratingsHandler.SyncMovies)
 		r.Post("/sync_series", ratingsHandler.SyncSeries)
 		r.Post("/refresh_movie", ratingsHandler.RefreshMovie)
+		r.Post("/refresh_series", ratingsHandler.RefreshSeries)
 		r.Get("/torrent_stats", ratingsHandler.TorrentStats)
 
 		// Curated Lists
@@ -318,6 +319,7 @@ func main() {
 
 			// Sync/Refresh admin API
 			r.Post("/api/refresh_all_movies", ratingsHandler.RefreshAllMovies)
+			r.Post("/api/refresh_all_series", ratingsHandler.RefreshAllSeries)
 
 			// Movies API
 			r.Get("/api/movies", func(w http.ResponseWriter, r *http.Request) {
@@ -345,6 +347,28 @@ func main() {
 			})
 			r.Delete("/api/movies/{id}", adminHandler.DeleteMovie)
 			r.Put("/api/movies/{id}", adminHandler.UpdateMovie)
+
+			// Series API
+			r.Post("/series", seriesHandler.AddSeries)
+			r.Get("/api/series/by-imdb/{imdbCode}", func(w http.ResponseWriter, r *http.Request) {
+				imdbCode := chi.URLParam(r, "imdbCode")
+				series, err := db.GetSeriesByIMDB(imdbCode)
+				w.Header().Set("Content-Type", "application/json")
+				if err != nil || series == nil {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"exists": false,
+					})
+					return
+				}
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"exists": true,
+					"series": series,
+				})
+			})
+			r.Delete("/api/series/{id}", seriesHandler.DeleteSeries)
+			r.Put("/api/series/{id}", seriesHandler.UpdateSeries)
+			r.Post("/api/season-packs/{id}/expand", seriesHandler.ExpandSeasonPack)
+			r.Post("/episodes/{id}/torrent", seriesHandler.AddEpisodeTorrent)
 
 			// Stats API
 			r.Get("/api/stats", func(w http.ResponseWriter, r *http.Request) {

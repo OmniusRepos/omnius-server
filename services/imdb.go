@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -450,4 +451,179 @@ func (s *IMDBService) GetContentType(imdbID string) (string, error) {
 		return "", err
 	}
 	return title.Type, nil
+}
+
+// IMDBEpisodesResponse represents the episodes endpoint response
+type IMDBEpisodesResponse struct {
+	Episodes      []IMDBEpisode `json:"episodes"`
+	TotalCount    int           `json:"totalCount"`
+	NextPageToken string        `json:"nextPageToken"`
+}
+
+type IMDBEpisode struct {
+	ID             string           `json:"id"`
+	Title          string           `json:"title"`
+	Season         string           `json:"season"`
+	EpisodeNumber  int              `json:"episodeNumber"`
+	Plot           string           `json:"plot"`
+	RuntimeSeconds int              `json:"runtimeSeconds"`
+	Rating         *IMDBRating      `json:"rating"`
+	PrimaryImage   *IMDBImage       `json:"primaryImage"`
+	ReleaseDate    *IMDBReleaseDate `json:"releaseDate"`
+}
+
+type IMDBReleaseDate struct {
+	Year  int `json:"year"`
+	Month int `json:"month"`
+	Day   int `json:"day"`
+}
+
+type IMDBSeason struct {
+	Season   int           `json:"season"`
+	Episodes []IMDBEpisode `json:"episodes"`
+}
+
+// FetchEpisodes gets all episodes for a TV series (with pagination)
+func (s *IMDBService) FetchEpisodes(imdbID string) (*IMDBEpisodesResponse, error) {
+	allEpisodes := &IMDBEpisodesResponse{
+		Episodes: []IMDBEpisode{},
+	}
+
+	pageToken := ""
+	for {
+		url := imdbAPIBaseURL + "/titles/" + imdbID + "/episodes"
+		if pageToken != "" {
+			url += "?pageToken=" + pageToken
+		}
+
+		resp, err := s.client.Get(url)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("IMDB API returned %d", resp.StatusCode)
+		}
+
+		var page IMDBEpisodesResponse
+		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
+		resp.Body.Close()
+		allEpisodes.Episodes = append(allEpisodes.Episodes, page.Episodes...)
+		allEpisodes.TotalCount = page.TotalCount
+
+		// Check if there are more pages
+		if page.NextPageToken == "" {
+			break
+		}
+		pageToken = page.NextPageToken
+
+		// Limit to prevent infinite loops
+		if len(allEpisodes.Episodes) >= 500 {
+			break
+		}
+	}
+
+	return allEpisodes, nil
+}
+
+// RichSeriesData combines data from multiple IMDB endpoints for TV series
+type RichSeriesData struct {
+	Title           string
+	Year            int
+	EndYear         *int
+	Runtime         int // minutes per episode
+	Genres          []string
+	Plot            string
+	Rating          float64
+	VoteCount       int
+	ContentRating   string
+	PosterURL       string
+	BackgroundURL   string
+	TotalSeasons    int
+	Status          string // Continuing or Ended
+	Network         string
+	Seasons         []IMDBSeason
+}
+
+// FetchRichSeriesData fetches all available data for a TV series
+func (s *IMDBService) FetchRichSeriesData(imdbID string) (*RichSeriesData, error) {
+	data := &RichSeriesData{}
+
+	// Fetch basic title info (required)
+	title, err := s.FetchTitle(imdbID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch title: %w", err)
+	}
+
+	// Accept TV series types only
+	validTypes := map[string]bool{"tvSeries": true, "tvMiniSeries": true}
+	if !validTypes[title.Type] {
+		return nil, fmt.Errorf("not a TV series: %s is a %s", imdbID, title.Type)
+	}
+
+	data.Title = title.PrimaryTitle
+	data.Year = title.StartYear
+	data.EndYear = title.EndYear
+	data.Runtime = title.RuntimeSeconds / 60
+	data.Genres = title.Genres
+	data.Plot = title.Plot
+	data.ContentRating = title.ContentRating
+
+	// Determine status
+	if title.EndYear != nil {
+		data.Status = "Ended"
+	} else {
+		data.Status = "Continuing"
+	}
+
+	if title.Rating != nil {
+		data.Rating = title.Rating.AggregateRating
+		data.VoteCount = title.Rating.VoteCount
+	}
+
+	if title.PrimaryImage != nil {
+		data.PosterURL = title.PrimaryImage.URL
+	}
+
+	// Fetch images for background (optional)
+	if images, err := s.FetchImages(imdbID); err == nil {
+		for _, img := range images.Images {
+			// Find a landscape image for background
+			if img.Width > img.Height && data.BackgroundURL == "" {
+				data.BackgroundURL = img.URL
+				break
+			}
+		}
+	}
+
+	// Fetch episodes (optional but important)
+	episodes, err := s.FetchEpisodes(imdbID)
+	if err != nil {
+		log.Printf("Failed to fetch episodes for %s: %v", imdbID, err)
+	} else if len(episodes.Episodes) > 0 {
+		// Group episodes by season
+		seasonMap := make(map[int][]IMDBEpisode)
+		for _, ep := range episodes.Episodes {
+			seasonNum := 0
+			if ep.Season != "" {
+				fmt.Sscanf(ep.Season, "%d", &seasonNum)
+			}
+			seasonMap[seasonNum] = append(seasonMap[seasonNum], ep)
+		}
+
+		// Convert to Seasons array
+		for seasonNum, eps := range seasonMap {
+			data.Seasons = append(data.Seasons, IMDBSeason{
+				Season:   seasonNum,
+				Episodes: eps,
+			})
+		}
+		data.TotalSeasons = len(seasonMap)
+	}
+
+	return data, nil
 }
