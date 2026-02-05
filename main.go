@@ -188,6 +188,7 @@ func main() {
 		r.Post("/get_ratings", ratingsHandler.GetRatings)
 		r.Post("/sync_movie", ratingsHandler.SyncMovie)
 		r.Post("/sync_movies", ratingsHandler.SyncMovies)
+		r.Post("/sync_series", ratingsHandler.SyncSeries)
 		r.Post("/refresh_movie", ratingsHandler.RefreshMovie)
 		r.Get("/torrent_stats", ratingsHandler.TorrentStats)
 
