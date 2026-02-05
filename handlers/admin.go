@@ -64,6 +64,11 @@ func (h *AdminHandler) AddMovie(w http.ResponseWriter, r *http.Request) {
 	rating, _ := strconv.ParseFloat(r.FormValue("rating"), 32)
 	runtime, _ := strconv.Atoi(r.FormValue("runtime"))
 
+	status := r.FormValue("status")
+	if status == "" {
+		status = "available"
+	}
+
 	movie := &models.Movie{
 		ImdbCode:         r.FormValue("imdb_code"),
 		Title:            r.FormValue("title"),
@@ -83,6 +88,8 @@ func (h *AdminHandler) AddMovie(w http.ResponseWriter, r *http.Request) {
 		SmallCoverImage:  r.FormValue("small_cover_image"),
 		MediumCoverImage: r.FormValue("medium_cover_image"),
 		LargeCoverImage:  r.FormValue("large_cover_image"),
+		Status:           status,
+		ReleaseDate:      r.FormValue("release_date"),
 	}
 
 	if movie.Language == "" {
@@ -218,6 +225,9 @@ func (h *AdminHandler) UpdateMovie(w http.ResponseWriter, r *http.Request) {
 		YtTrailerCode    string  `json:"yt_trailer_code"`
 		MediumCoverImage string  `json:"medium_cover_image"`
 		BackgroundImage  string  `json:"background_image"`
+		Status           string  `json:"status"`
+		ReleaseDate      string  `json:"release_date"`
+		Franchise        string  `json:"franchise"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
@@ -251,6 +261,11 @@ func (h *AdminHandler) UpdateMovie(w http.ResponseWriter, r *http.Request) {
 	movie.YtTrailerCode = update.YtTrailerCode
 	movie.MediumCoverImage = update.MediumCoverImage
 	movie.BackgroundImage = update.BackgroundImage
+	if update.Status != "" {
+		movie.Status = update.Status
+	}
+	movie.ReleaseDate = update.ReleaseDate
+	movie.Franchise = update.Franchise
 
 	if err := h.db.UpdateMovie(movie); err != nil {
 		http.Error(w, "Failed to update movie: "+err.Error(), http.StatusInternalServerError)

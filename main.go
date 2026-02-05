@@ -136,8 +136,11 @@ func main() {
 	// Health check
 	r.Get("/health", streamHandler.Health)
 
+	// Initialize sync service (for syncing movies from external sources)
+	syncService := services.NewSyncService(db)
+
 	// Initialize ratings handler
-	ratingsHandler := handlers.NewRatingsHandler(db)
+	ratingsHandler := handlers.NewRatingsHandler(db, syncService)
 
 	// Initialize series handler
 	seriesHandler := handlers.NewSeriesHandler(db)
@@ -148,30 +151,56 @@ func main() {
 	// Initialize home handler
 	homeHandler := handlers.NewHomeHandler(db)
 
+	// Initialize channel handler
+	channelHandler := handlers.NewChannelHandler(db)
+
+	// Initialize analytics handler
+	analyticsHandler := handlers.NewAnalyticsHandler(db, torrentService)
+
 	// YTS-compatible API (public)
 	r.Route("/api/v2", func(r chi.Router) {
 		// Home
 		r.Get("/home.json", apiHandler.Home)
 
+		// Search (unified)
+		r.Get("/search.json", apiHandler.UnifiedSearch)
+
 		// Movies
 		r.Get("/list_movies.json", apiHandler.ListMovies)
 		r.Get("/movie_details.json", apiHandler.MovieDetails)
 		r.Get("/movie_suggestions.json", apiHandler.MovieSuggestions)
+		r.Get("/franchise_movies.json", apiHandler.FranchiseMovies)
+		r.Get("/check_availability", apiHandler.CheckAvailability)
 
 		// Series
 		r.Get("/list_series.json", seriesHandler.ListSeries)
 		r.Get("/series_details.json", seriesHandler.SeriesDetails)
 		r.Get("/season_episodes.json", seriesHandler.SeasonEpisodes)
 
+		// Channels (IPTV)
+		r.Get("/list_channels.json", channelHandler.ListChannels)
+		r.Get("/channel_details.json", channelHandler.GetChannel)
+		r.Get("/channel_countries.json", channelHandler.ListCountries)
+		r.Get("/channel_categories.json", channelHandler.ListCategories)
+		r.Get("/channels_by_country.json", channelHandler.GetChannelsByCountry)
+
 		// Ratings & Sync
 		r.Post("/get_ratings", ratingsHandler.GetRatings)
 		r.Post("/sync_movie", ratingsHandler.SyncMovie)
 		r.Post("/sync_movies", ratingsHandler.SyncMovies)
+		r.Post("/refresh_movie", ratingsHandler.RefreshMovie)
 		r.Get("/torrent_stats", ratingsHandler.TorrentStats)
 
 		// Curated Lists
 		r.Get("/curated_lists.json", curatedHandler.ListCuratedLists)
 		r.Get("/curated_list.json", curatedHandler.GetCuratedList)
+
+		// Analytics (public - for recording views and stream tracking)
+		r.Post("/analytics/view", analyticsHandler.RecordView)
+		r.Get("/analytics/top-movies", analyticsHandler.GetTopMoviesAPI)
+		r.Post("/analytics/stream/start", analyticsHandler.StreamStart)
+		r.Post("/analytics/stream/heartbeat", analyticsHandler.StreamHeartbeat)
+		r.Post("/analytics/stream/end", analyticsHandler.StreamEnd)
 	})
 
 	// Stremio addon (public)
@@ -282,6 +311,12 @@ func main() {
 			r.Put("/api/home/sections/{id}", homeHandler.AdminUpdateHomeSection)
 			r.Delete("/api/home/sections/{id}", homeHandler.AdminDeleteHomeSection)
 			r.Post("/api/home/sections/reorder", homeHandler.AdminReorderHomeSections)
+
+			// Analytics admin API
+			r.Get("/api/analytics", analyticsHandler.GetAnalytics)
+
+			// Sync/Refresh admin API
+			r.Post("/api/refresh_all_movies", ratingsHandler.RefreshAllMovies)
 
 			// Movies API
 			r.Get("/api/movies", func(w http.ResponseWriter, r *http.Request) {

@@ -63,6 +63,17 @@ export interface Movie {
   franchise?: string;
   torrents: Torrent[];
   cast?: Cast[];
+  // Rich data from IMDB
+  director?: string;
+  writers?: string[];
+  budget?: string;
+  box_office_gross?: string;
+  country?: string;
+  awards?: string;
+  all_images?: string[];
+  // Coming soon status
+  status?: string;        // "available" or "coming_soon"
+  release_date?: string;  // YYYY-MM-DD format
 }
 
 export interface Cast {

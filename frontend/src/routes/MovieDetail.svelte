@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { link, push } from 'svelte-spa-router';
-  import { getMovie, deleteMovie, updateMovie, type Movie } from '../lib/api/client';
+  import { getMovie, deleteMovie, updateMovie, getMovies, type Movie } from '../lib/api/client';
   import Modal from '../lib/components/Modal.svelte';
 
   export let params: { id: string };
@@ -9,11 +9,31 @@
   let movie: Movie | null = null;
   let loading = true;
   let fetchingImdb = false;
+  let refreshing = false;
+
+  // Franchise movies
+  let franchiseMovies: Movie[] = [];
+  let loadingFranchise = false;
 
   // Modal states
   let showEditModal = false;
   let showDeleteModal = false;
   let showTorrentModal = false;
+  let showFranchiseModal = false;
+
+  // Franchise search
+  let franchiseSearch = '';
+  let franchiseSearchResults: any[] = [];  // IMDB results
+  let searchingFranchise = false;
+
+  interface IMDBResult {
+    id: string;
+    type: string;
+    primaryTitle: string;
+    startYear: number;
+    primaryImage?: { url: string };
+    rating?: { aggregateRating: number };
+  }
 
   // Forms
   let movieForm = {
@@ -28,6 +48,9 @@
     yt_trailer_code: '',
     medium_cover_image: '',
     background_image: '',
+    status: 'available',
+    release_date: '',
+    franchise: '',
   };
 
   let torrentForm = {
@@ -45,10 +68,119 @@
     loading = true;
     try {
       movie = await getMovie(parseInt(params.id));
+      // Load franchise movies after main movie loads
+      if (movie) {
+        loadFranchiseMovies();
+      }
     } catch (err) {
       console.error('Failed to load movie:', err);
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadFranchiseMovies() {
+    if (!movie?.franchise) return;
+    loadingFranchise = true;
+    try {
+      const res = await fetch(`/api/v2/franchise_movies.json?movie_id=${movie.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        franchiseMovies = data.data?.movies || [];
+      }
+    } catch (err) {
+      console.error('Failed to load franchise movies:', err);
+    } finally {
+      loadingFranchise = false;
+    }
+  }
+
+  function openFranchiseModal() {
+    // Pre-fill with title prefix (e.g., "Avengers" from "Avengers: Endgame")
+    // This is more specific than broad franchises like "Marvel"
+    const titlePrefix = movie?.title?.split(/[:\-–]/)[0].trim() || '';
+    franchiseSearch = titlePrefix;
+    franchiseSearchResults = [];
+    showFranchiseModal = true;
+    searchFranchiseMovies();
+  }
+
+  async function searchFranchiseMovies() {
+    if (!franchiseSearch.trim()) {
+      franchiseSearchResults = [];
+      return;
+    }
+    searchingFranchise = true;
+    try {
+      // Search IMDB API
+      const res = await fetch(`/admin/api/imdb/search?query=${encodeURIComponent(franchiseSearch)}`);
+      if (res.ok) {
+        const data = await res.json();
+        // Filter to only movies, exclude current movie
+        franchiseSearchResults = (data.titles || [])
+          .filter((t: IMDBResult) => t.type === 'movie' && t.id !== movie?.imdb_code)
+          .slice(0, 12);
+      }
+    } catch (err) {
+      console.error('Failed to search franchise:', err);
+    } finally {
+      searchingFranchise = false;
+    }
+  }
+
+  async function setFranchiseForCurrentMovie() {
+    if (!movie || !franchiseSearch.trim()) return;
+    try {
+      await updateMovie(movie.id, { franchise: franchiseSearch.trim() });
+      showFranchiseModal = false;
+      await loadMovie();
+    } catch (err) {
+      console.error('Failed to set franchise:', err);
+    }
+  }
+
+  async function addIMDBMovieToFranchise(imdbResult: IMDBResult) {
+    if (!franchiseSearch.trim()) return;
+    try {
+      // Sync movie from IMDB to local DB with franchise
+      const res = await fetch('/api/v2/sync_movie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imdb_code: imdbResult.id,
+          franchise: franchiseSearch.trim()
+        }),
+      });
+      if (res.ok) {
+        // Remove from results
+        franchiseSearchResults = franchiseSearchResults.filter(r => r.id !== imdbResult.id);
+        // Reload franchise movies
+        loadFranchiseMovies();
+      }
+    } catch (err) {
+      console.error('Failed to add movie:', err);
+    }
+  }
+
+  async function refreshMovieData() {
+    if (!movie) return;
+    refreshing = true;
+    try {
+      const res = await fetch('/api/v2/refresh_movie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ movie_id: movie.id }),
+      });
+      if (res.ok) {
+        await loadMovie(); // Reload movie data
+      } else {
+        const data = await res.json();
+        alert('Failed to refresh: ' + (data.status_message || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error('Failed to refresh movie:', err);
+    } finally {
+      refreshing = false;
     }
   }
 
@@ -59,13 +191,16 @@
       title: movie.title,
       year: movie.year,
       rating: movie.rating || 0,
-      runtime: 0,
+      runtime: movie.runtime || 0,
       genres: movie.genres?.join(', ') || '',
-      language: 'en',
+      language: movie.language || 'en',
       summary: movie.summary || '',
-      yt_trailer_code: '',
+      yt_trailer_code: movie.yt_trailer_code || '',
       medium_cover_image: movie.medium_cover_image || '',
-      background_image: '',
+      background_image: movie.background_image || '',
+      status: movie.status || 'available',
+      release_date: movie.release_date || '',
+      franchise: movie.franchise || '',
     };
     showEditModal = true;
   }
@@ -107,6 +242,9 @@
         yt_trailer_code: movieForm.yt_trailer_code,
         medium_cover_image: movieForm.medium_cover_image,
         background_image: movieForm.background_image,
+        status: movieForm.status,
+        release_date: movieForm.release_date,
+        franchise: movieForm.franchise,
       });
       showEditModal = false;
       await loadMovie();
@@ -170,6 +308,10 @@
     <div class="card movie-card">
       <div class="movie-header">
         <div class="movie-actions">
+          <button class="btn btn-primary" on:click={refreshMovieData} disabled={refreshing || !movie?.imdb_code}>
+            {refreshing ? 'REFRESHING...' : 'REFRESH DATA'}
+          </button>
+          <button class="btn btn-secondary" on:click={openFranchiseModal}>FIND FRANCHISE</button>
           <button class="btn btn-secondary" on:click={openEditModal}>EDIT</button>
           <button class="btn btn-danger" on:click={() => showDeleteModal = true}>DELETE</button>
         </div>
@@ -261,6 +403,309 @@
       </div>
     </div>
 
+    <!-- Details Grid -->
+    <div class="card details-card">
+      <h3>Details</h3>
+      <div class="details-grid">
+        <div class="detail-row">
+          <span class="detail-label">Title</span>
+          <span class="detail-value">{movie.title}</span>
+        </div>
+        {#if movie.title_english && movie.title_english !== movie.title}
+          <div class="detail-row">
+            <span class="detail-label">English Title</span>
+            <span class="detail-value">{movie.title_english}</span>
+          </div>
+        {/if}
+        {#if movie.title_long}
+          <div class="detail-row">
+            <span class="detail-label">Full Title</span>
+            <span class="detail-value">{movie.title_long}</span>
+          </div>
+        {/if}
+        <div class="detail-row">
+          <span class="detail-label">Year</span>
+          <span class="detail-value">{movie.year}</span>
+        </div>
+        {#if movie.runtime}
+          <div class="detail-row">
+            <span class="detail-label">Runtime</span>
+            <span class="detail-value">{movie.runtime} min ({Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m)</span>
+          </div>
+        {/if}
+        {#if movie.director}
+          <div class="detail-row">
+            <span class="detail-label">Director</span>
+            <span class="detail-value">{movie.director}</span>
+          </div>
+        {/if}
+        {#if movie.writers && movie.writers.length > 0}
+          <div class="detail-row">
+            <span class="detail-label">Writers</span>
+            <span class="detail-value">{movie.writers.join(', ')}</span>
+          </div>
+        {/if}
+        {#if movie.language}
+          <div class="detail-row">
+            <span class="detail-label">Language</span>
+            <span class="detail-value">{movie.language.toUpperCase()}</span>
+          </div>
+        {/if}
+        {#if movie.country}
+          <div class="detail-row">
+            <span class="detail-label">Country</span>
+            <span class="detail-value">{movie.country}</span>
+          </div>
+        {/if}
+        {#if movie.mpa_rating}
+          <div class="detail-row">
+            <span class="detail-label">Rating</span>
+            <span class="detail-value">{movie.mpa_rating}</span>
+          </div>
+        {/if}
+        {#if movie.genres && movie.genres.length > 0}
+          <div class="detail-row">
+            <span class="detail-label">Genres</span>
+            <span class="detail-value">{movie.genres.join(', ')}</span>
+          </div>
+        {/if}
+        {#if movie.franchise}
+          <div class="detail-row">
+            <span class="detail-label">Franchise</span>
+            <span class="detail-value">{movie.franchise}</span>
+          </div>
+        {/if}
+        {#if movie.awards}
+          <div class="detail-row">
+            <span class="detail-label">Awards</span>
+            <span class="detail-value">{movie.awards}</span>
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Franchise Section -->
+    {#if movie.franchise && franchiseMovies.length > 0}
+      <div class="card franchise-card">
+        <h3>{movie.franchise} Franchise</h3>
+
+        {#if loadingFranchise}
+          <p class="text-muted">Loading...</p>
+        {:else}
+          <div class="franchise-section">
+            <div class="franchise-grid">
+              {#each franchiseMovies as fm}
+                <a href="#/movies/{fm.id}" class="franchise-movie">
+                  {#if fm.medium_cover_image}
+                    <img src={fm.medium_cover_image} alt={fm.title} class="franchise-poster" />
+                  {:else}
+                    <div class="franchise-poster franchise-placeholder">
+                      <span>{fm.title.charAt(0)}</span>
+                    </div>
+                  {/if}
+                  <div class="franchise-info">
+                    <span class="franchise-title">{fm.title}</span>
+                    <span class="franchise-year">{fm.year}</span>
+                  </div>
+                </a>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- Box Office -->
+    {#if movie.budget || movie.box_office_gross}
+      <div class="card box-office-card">
+        <h3>Box Office</h3>
+        <div class="box-office-grid">
+          {#if movie.budget}
+            <div class="box-office-item">
+              <span class="box-office-label">Budget</span>
+              <span class="box-office-value">{movie.budget}</span>
+            </div>
+          {/if}
+          {#if movie.box_office_gross}
+            <div class="box-office-item">
+              <span class="box-office-label">Worldwide Gross</span>
+              <span class="box-office-value">{movie.box_office_gross}</span>
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Ratings Card -->
+    {#if movie.imdb_rating || movie.rotten_tomatoes || movie.metacritic || movie.rating}
+      <div class="card ratings-card">
+        <h3>Ratings</h3>
+        <div class="ratings-grid">
+          {#if movie.imdb_rating}
+            <div class="rating-box rating-imdb">
+              <div class="rating-icon">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="#f5c518">
+                  <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                </svg>
+              </div>
+              <div class="rating-info">
+                <span class="rating-source">IMDb</span>
+                <span class="rating-value">{movie.imdb_rating}<span class="rating-max">/10</span></span>
+                {#if movie.imdb_votes}
+                  <span class="rating-votes">{movie.imdb_votes} votes</span>
+                {/if}
+              </div>
+            </div>
+          {/if}
+          {#if movie.rotten_tomatoes}
+            <div class="rating-box" class:rating-rt-fresh={movie.rotten_tomatoes >= 60} class:rating-rt-rotten={movie.rotten_tomatoes < 60}>
+              <div class="rating-icon">
+                {#if movie.rotten_tomatoes >= 60}
+                  <span class="rt-icon fresh">🍅</span>
+                {:else}
+                  <span class="rt-icon rotten">🤢</span>
+                {/if}
+              </div>
+              <div class="rating-info">
+                <span class="rating-source">Rotten Tomatoes</span>
+                <span class="rating-value">{movie.rotten_tomatoes}<span class="rating-max">%</span></span>
+                <span class="rating-label">{movie.rotten_tomatoes >= 60 ? 'Fresh' : 'Rotten'}</span>
+              </div>
+            </div>
+          {/if}
+          {#if movie.metacritic}
+            <div class="rating-box rating-mc" class:mc-good={movie.metacritic >= 60} class:mc-mixed={(movie.metacritic >= 40 && movie.metacritic < 60)} class:mc-bad={movie.metacritic < 40}>
+              <div class="rating-icon mc-score" class:mc-good={movie.metacritic >= 60} class:mc-mixed={(movie.metacritic >= 40 && movie.metacritic < 60)} class:mc-bad={movie.metacritic < 40}>
+                {movie.metacritic}
+              </div>
+              <div class="rating-info">
+                <span class="rating-source">Metacritic</span>
+                <span class="rating-label">
+                  {#if movie.metacritic >= 60}
+                    Generally Favorable
+                  {:else if movie.metacritic >= 40}
+                    Mixed Reviews
+                  {:else}
+                    Generally Unfavorable
+                  {/if}
+                </span>
+              </div>
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Stats Card -->
+    {#if movie.like_count || movie.download_count}
+      <div class="card stats-card">
+        <h3>Statistics</h3>
+        <div class="stats-grid">
+          {#if movie.like_count}
+            <div class="stat-item">
+              <span class="stat-value">{movie.like_count.toLocaleString()}</span>
+              <span class="stat-label">Likes</span>
+            </div>
+          {/if}
+          {#if movie.download_count}
+            <div class="stat-item">
+              <span class="stat-value">{movie.download_count.toLocaleString()}</span>
+              <span class="stat-label">Downloads</span>
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Technical Info -->
+    <div class="card tech-card">
+      <h3>Technical Info</h3>
+      <div class="details-grid">
+        <div class="detail-row">
+          <span class="detail-label">Database ID</span>
+          <span class="detail-value mono">{movie.id}</span>
+        </div>
+        {#if movie.imdb_code}
+          <div class="detail-row">
+            <span class="detail-label">IMDB Code</span>
+            <span class="detail-value">
+              <a href="https://www.imdb.com/title/{movie.imdb_code}" target="_blank" rel="noopener" class="mono link">{movie.imdb_code}</a>
+            </span>
+          </div>
+        {/if}
+        {#if movie.slug}
+          <div class="detail-row">
+            <span class="detail-label">Slug</span>
+            <span class="detail-value mono">{movie.slug}</span>
+          </div>
+        {/if}
+        {#if movie.provider}
+          <div class="detail-row">
+            <span class="detail-label">Provider</span>
+            <span class="detail-value">{movie.provider}</span>
+          </div>
+        {/if}
+        {#if movie.content_type}
+          <div class="detail-row">
+            <span class="detail-label">Content Type</span>
+            <span class="detail-value">{movie.content_type}</span>
+          </div>
+        {/if}
+        {#if movie.date_uploaded}
+          <div class="detail-row">
+            <span class="detail-label">Date Uploaded</span>
+            <span class="detail-value">{movie.date_uploaded}</span>
+          </div>
+        {/if}
+        {#if movie.yt_trailer_code}
+          <div class="detail-row">
+            <span class="detail-label">YouTube Trailer</span>
+            <span class="detail-value">
+              <a href="https://www.youtube.com/watch?v={movie.yt_trailer_code}" target="_blank" rel="noopener" class="mono link">{movie.yt_trailer_code}</a>
+            </span>
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Images Card -->
+    <div class="card images-card">
+      <h3>Images ({(movie.all_images?.length || 0) + (movie.medium_cover_image ? 1 : 0) + (movie.background_image ? 1 : 0)})</h3>
+      <div class="images-grid">
+        {#if movie.medium_cover_image}
+          <div class="image-item">
+            <span class="image-label">Poster</span>
+            <a href={movie.medium_cover_image} target="_blank" rel="noopener">
+              <img src={movie.medium_cover_image} alt="Poster" class="preview-image" />
+            </a>
+          </div>
+        {/if}
+        {#if movie.background_image}
+          <div class="image-item image-wide">
+            <span class="image-label">Background</span>
+            <a href={movie.background_image} target="_blank" rel="noopener">
+              <img src={movie.background_image} alt="Background" class="preview-image preview-wide" />
+            </a>
+          </div>
+        {/if}
+        {#if movie.all_images && movie.all_images.length > 0}
+          {#each movie.all_images.slice(0, 12) as imgUrl, i}
+            <div class="image-item">
+              <span class="image-label">Image {i + 1}</span>
+              <a href={imgUrl} target="_blank" rel="noopener">
+                <img src={imgUrl} alt="Image {i + 1}" class="preview-image" loading="lazy" />
+              </a>
+            </div>
+          {/each}
+          {#if movie.all_images.length > 12}
+            <div class="image-item more-images">
+              <span class="more-count">+{movie.all_images.length - 12} more</span>
+            </div>
+          {/if}
+        {/if}
+      </div>
+    </div>
+
     <!-- Cast -->
     {#if movie.cast && movie.cast.length > 0}
       <div class="card cast-card">
@@ -302,9 +747,6 @@
             <span class="torrent-type">{torrent.type}</span>
             <span class="torrent-size">{torrent.size}</span>
             <span class="torrent-hash" title={torrent.hash}>{torrent.hash.substring(0, 8)}...</span>
-            <div class="torrent-actions">
-              <a href="/stream/{torrent.hash}/0" target="_blank" class="btn btn-sm btn-primary">PLAY</a>
-            </div>
           </div>
         {/each}
       {:else}
@@ -380,6 +822,25 @@
       <label class="form-label" for="summary">Summary</label>
       <textarea id="summary" class="form-input form-textarea" bind:value={movieForm.summary} rows="3"></textarea>
     </div>
+    <div class="form-group">
+      <label class="form-label" for="franchise">Franchise</label>
+      <input type="text" id="franchise" class="form-input" bind:value={movieForm.franchise} placeholder="e.g., Lord of the Rings, Star Wars" />
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label checkbox-label">
+          <input type="checkbox" checked={movieForm.status === 'coming_soon'} on:change={(e) => movieForm.status = e.currentTarget.checked ? 'coming_soon' : 'available'} />
+          Coming Soon
+        </label>
+        <p class="form-hint">Mark as upcoming release</p>
+      </div>
+      {#if movieForm.status === 'coming_soon'}
+        <div class="form-group">
+          <label class="form-label" for="release_date">Release Date</label>
+          <input type="date" id="release_date" class="form-input" bind:value={movieForm.release_date} />
+        </div>
+      {/if}
+    </div>
   </form>
   <svelte:fragment slot="footer">
     <button class="btn btn-secondary" on:click={() => showEditModal = false}>Cancel</button>
@@ -396,6 +857,75 @@
   <svelte:fragment slot="footer">
     <button class="btn btn-secondary" on:click={() => showDeleteModal = false}>Cancel</button>
     <button class="btn btn-danger" on:click={handleDeleteMovie}>Delete</button>
+  </svelte:fragment>
+</Modal>
+
+<!-- Find Franchise Modal -->
+<Modal bind:open={showFranchiseModal} title="Find Franchise" size="lg" on:close={() => showFranchiseModal = false}>
+  <div class="franchise-modal">
+    <div class="form-group">
+      <label class="form-label" for="franchise_name">Franchise Name</label>
+      <div class="search-row">
+        <input
+          type="text"
+          id="franchise_name"
+          class="form-input"
+          bind:value={franchiseSearch}
+          placeholder="e.g., Avengers, Spider-Man, Batman"
+          on:input={() => searchFranchiseMovies()}
+        />
+      </div>
+      <p class="text-muted" style="margin-top: 8px; font-size: 13px;">
+        Search IMDB for movies to add to this franchise
+      </p>
+    </div>
+
+    {#if searchingFranchise}
+      <div class="loading-small">Searching IMDB...</div>
+    {:else if franchiseSearchResults.length > 0}
+      <div class="franchise-results">
+        <p class="results-label">Movies from IMDB ({franchiseSearchResults.length}):</p>
+        <div class="franchise-grid">
+          {#each franchiseSearchResults as fm}
+            <div class="franchise-result-item">
+              {#if fm.primaryImage?.url}
+                <img src={fm.primaryImage.url} alt={fm.primaryTitle} />
+              {:else}
+                <div class="no-poster">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="2" y="2" width="20" height="20" rx="2"/>
+                    <line x1="7" y1="2" x2="7" y2="22"/>
+                    <line x1="17" y1="2" x2="17" y2="22"/>
+                  </svg>
+                </div>
+              {/if}
+              <div class="result-info">
+                <span class="result-title">{fm.primaryTitle}</span>
+                <span class="result-year">{fm.startYear}</span>
+                {#if fm.rating?.aggregateRating}
+                  <span class="result-rating">IMDB: {fm.rating.aggregateRating}</span>
+                {/if}
+              </div>
+              <button class="btn btn-sm btn-primary add-btn" on:click={() => addIMDBMovieToFranchise(fm)} title="Add to franchise">
+                +
+              </button>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {:else if franchiseSearch.trim()}
+      <p class="text-muted">No movies found matching "{franchiseSearch}"</p>
+    {/if}
+  </div>
+  <svelte:fragment slot="footer">
+    <button class="btn btn-secondary" on:click={() => showFranchiseModal = false}>Cancel</button>
+    <button
+      class="btn btn-primary"
+      on:click={setFranchiseForCurrentMovie}
+      disabled={!franchiseSearch.trim()}
+    >
+      Set "{franchiseSearch}" as Franchise
+    </button>
   </svelte:fragment>
 </Modal>
 
@@ -781,6 +1311,25 @@
     margin-bottom: 8px;
   }
 
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+  }
+
+  .form-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
   .empty-state {
     text-align: center;
     padding: 48px;
@@ -789,5 +1338,519 @@
   .empty-state p {
     margin-bottom: 16px;
     color: var(--text-muted);
+  }
+
+  /* Details Card */
+  .details-card,
+  .ratings-card,
+  .stats-card,
+  .tech-card,
+  .images-card {
+    margin-bottom: 24px;
+  }
+
+  .details-card h3,
+  .ratings-card h3,
+  .stats-card h3,
+  .tech-card h3,
+  .images-card h3 {
+    margin-bottom: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .details-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .detail-row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 16px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .detail-row:last-child {
+    border-bottom: none;
+  }
+
+  .detail-label {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .detail-value {
+    color: var(--text-primary);
+    font-size: 14px;
+  }
+
+  .detail-value.mono,
+  .mono {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 13px;
+  }
+
+  .link {
+    color: var(--accent-blue);
+    text-decoration: none;
+  }
+
+  .link:hover {
+    text-decoration: underline;
+  }
+
+  /* Ratings Card */
+  .ratings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+  }
+
+  .rating-box {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+  }
+
+  .rating-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+  }
+
+  .rt-icon {
+    font-size: 32px;
+  }
+
+  .mc-score {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 700;
+    color: white;
+    border-radius: 8px;
+  }
+
+  .mc-score.mc-good {
+    background: #66cc33;
+  }
+
+  .mc-score.mc-mixed {
+    background: #ffcc33;
+    color: #333;
+  }
+
+  .mc-score.mc-bad {
+    background: #ff0000;
+  }
+
+  .rating-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .rating-source {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .rating-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .rating-max {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+
+  .rating-votes,
+  .rating-label {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .rating-rt-fresh .rating-value {
+    color: #21d07a;
+  }
+
+  .rating-rt-rotten .rating-value {
+    color: #fa320a;
+  }
+
+  /* Stats Card */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 16px;
+  }
+
+  .stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    text-align: center;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .stat-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Images Card */
+  .images-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 16px;
+  }
+
+  .image-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .image-item.image-wide {
+    grid-column: span 2;
+  }
+
+  .image-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  .preview-image {
+    width: 100%;
+    max-width: 150px;
+    height: auto;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .preview-image:hover {
+    transform: scale(1.05);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+
+  .preview-wide {
+    max-width: 300px;
+  }
+
+  /* Franchise Section */
+  .franchise-card {
+    margin-bottom: 24px;
+  }
+
+  .franchise-card h3 {
+    margin-bottom: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .franchise-section {
+    margin-bottom: 20px;
+  }
+
+  .franchise-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .franchise-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+
+  .franchise-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+
+  .franchise-movie {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .franchise-movie:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+
+  .franchise-poster {
+    width: 100%;
+    aspect-ratio: 2/3;
+    object-fit: cover;
+  }
+
+  .franchise-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    font-size: 32px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .franchise-info {
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .franchise-title {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .franchise-year {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .franchise-movie.suggested {
+    border: 2px dashed var(--border-color);
+  }
+
+  .add-franchise-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .franchise-movie.suggested:hover .add-franchise-btn {
+    opacity: 1;
+  }
+
+  /* Franchise Modal */
+  .franchise-modal {
+    min-height: 200px;
+  }
+
+  .search-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .search-row .form-input {
+    flex: 1;
+  }
+
+  .loading-small {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+
+  .franchise-results {
+    margin-top: 16px;
+  }
+
+  .results-label {
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 12px;
+    color: var(--text-secondary);
+  }
+
+  .franchise-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .franchise-result-item {
+    display: flex;
+    gap: 12px;
+    padding: 10px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    align-items: center;
+  }
+
+  .franchise-result-item img {
+    width: 45px;
+    height: 67px;
+    object-fit: cover;
+    border-radius: 4px;
+  }
+
+  .franchise-result-item .no-poster {
+    width: 45px;
+    height: 67px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    color: var(--text-muted);
+  }
+
+  .result-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .result-title {
+    font-weight: 500;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .result-year {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .result-franchise {
+    font-size: 11px;
+    color: var(--accent-color);
+  }
+
+  .result-rating {
+    font-size: 11px;
+    color: #f5c518;
+  }
+
+  .franchise-result-item {
+    position: relative;
+  }
+
+  .franchise-result-item .add-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 18px;
+    line-height: 1;
+    border-radius: 50%;
+  }
+
+  /* Box Office */
+  .box-office-card {
+    margin-bottom: 24px;
+  }
+
+  .box-office-card h3 {
+    margin-bottom: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .box-office-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 16px;
+  }
+
+  .box-office-item {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+  }
+
+  .box-office-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+
+  .box-office-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--accent-green, #22c55e);
+  }
+
+  /* More images indicator */
+  .more-images {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    min-height: 100px;
+  }
+
+  .more-count {
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 500;
   }
 </style>

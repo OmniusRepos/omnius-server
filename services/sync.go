@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -13,15 +14,15 @@ import (
 type SyncService struct {
 	db        *database.DB
 	providers []providers.TorrentProvider
-	omdb      *OMDBService
+	imdb      *IMDBService
 	mu        sync.Mutex
 	running   bool
 }
 
-func NewSyncService(db *database.DB, omdb *OMDBService) *SyncService {
+func NewSyncService(db *database.DB) *SyncService {
 	return &SyncService{
 		db:   db,
-		omdb: omdb,
+		imdb: NewIMDBService(),
 		providers: []providers.TorrentProvider{
 			providers.NewYTSProvider(),
 			providers.NewEZTVProvider(),
@@ -43,11 +44,25 @@ func (s *SyncService) SyncMovie(imdbCode string) (*models.Movie, error) {
 		return existing, nil
 	}
 
-	// Fetch from OMDB
-	movie, err := s.omdb.FetchByIMDB(imdbCode)
+	// Fetch rich data from IMDB API
+	richData, err := s.imdb.FetchRichData(imdbCode)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch from IMDB: %w", err)
 	}
+
+	movie := richData.ToMovie(imdbCode)
+	// Set additional data from rich response
+	if len(richData.Directors) > 0 {
+		movie.Director = richData.Directors[0]
+	}
+	movie.Writers = richData.Writers
+	movie.Cast = richData.Cast
+	movie.Budget = richData.Budget
+	movie.BoxOfficeGross = richData.BoxOfficeGross
+	movie.AllImages = richData.AllImages
+	movie.Provider = "imdb"
+	movie.ContentType = "movie"
+	log.Printf("Fetched rich data from IMDB for %s", imdbCode)
 
 	// Save movie
 	if err := s.db.CreateMovie(movie); err != nil {
@@ -55,6 +70,113 @@ func (s *SyncService) SyncMovie(imdbCode string) (*models.Movie, error) {
 	}
 
 	// Fetch torrents
+	s.syncMovieTorrents(movie)
+
+	return movie, nil
+}
+
+// RefreshAllMovies refreshes all movies in the database
+func (s *SyncService) RefreshAllMovies() {
+	log.Println("Starting refresh all movies...")
+
+	movies, _, err := s.db.ListMovies(database.MovieFilter{Limit: 10000})
+	if err != nil {
+		log.Printf("Failed to list movies: %v", err)
+		return
+	}
+
+	total := len(movies)
+	refreshed := 0
+	failed := 0
+
+	for i, movie := range movies {
+		if movie.ImdbCode == "" {
+			log.Printf("[%d/%d] Skipping %s - no IMDB code", i+1, total, movie.Title)
+			continue
+		}
+
+		log.Printf("[%d/%d] Refreshing %s (%s)...", i+1, total, movie.Title, movie.ImdbCode)
+		_, err := s.RefreshMovie(&movie)
+		if err != nil {
+			log.Printf("  Failed: %v", err)
+			failed++
+		} else {
+			log.Printf("  Done")
+			refreshed++
+		}
+
+		// Rate limiting - don't hammer the APIs
+		time.Sleep(2 * time.Second)
+	}
+
+	log.Printf("Refresh all movies completed: %d refreshed, %d failed, %d total", refreshed, failed, total)
+}
+
+// RefreshMovie re-fetches data for an existing movie
+func (s *SyncService) RefreshMovie(movie *models.Movie) (*models.Movie, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if movie.ImdbCode == "" {
+		return nil, fmt.Errorf("movie has no IMDB code")
+	}
+
+	// Fetch rich data from IMDB
+	richData, err := s.imdb.FetchRichData(movie.ImdbCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from IMDB: %w", err)
+	}
+
+	// Update movie with rich data
+	movie.Title = richData.Title
+	if richData.OriginalTitle != "" {
+		movie.TitleEnglish = richData.OriginalTitle
+	}
+	movie.Year = uint(richData.Year)
+	movie.Runtime = uint(richData.Runtime)
+	movie.Genres = richData.Genres
+	movie.Summary = richData.Plot
+	movie.DescriptionFull = richData.Plot
+	movie.MpaRating = richData.ContentRating
+
+	if richData.Rating > 0 {
+		r := float32(richData.Rating)
+		movie.Rating = r
+		movie.ImdbRating = &r
+	}
+	if richData.VoteCount > 0 {
+		movie.ImdbVotes = formatVotes(richData.VoteCount)
+	}
+	if richData.Metacritic > 0 {
+		movie.Metacritic = &richData.Metacritic
+	}
+	if len(richData.Directors) > 0 {
+		movie.Director = richData.Directors[0]
+	}
+	movie.Writers = richData.Writers
+	movie.Cast = richData.Cast
+	movie.Budget = richData.Budget
+	movie.BoxOfficeGross = richData.BoxOfficeGross
+	movie.AllImages = richData.AllImages
+
+	if richData.PosterURL != "" {
+		movie.SmallCoverImage = richData.PosterURL
+		movie.MediumCoverImage = richData.PosterURL
+		movie.LargeCoverImage = richData.PosterURL
+	}
+	if richData.BackgroundURL != "" {
+		movie.BackgroundImage = richData.BackgroundURL
+	}
+
+	movie.Provider = "imdb"
+	log.Printf("Refreshed movie %s from IMDB", movie.ImdbCode)
+
+	// Save updated movie
+	if err := s.db.UpdateMovie(movie); err != nil {
+		return nil, fmt.Errorf("failed to save refreshed movie: %w", err)
+	}
+
+	// Also sync torrents
 	s.syncMovieTorrents(movie)
 
 	return movie, nil

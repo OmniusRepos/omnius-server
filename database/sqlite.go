@@ -181,6 +181,7 @@ func (d *DB) migrate() error {
 		section_id TEXT UNIQUE NOT NULL,
 		title TEXT NOT NULL,
 		section_type TEXT NOT NULL DEFAULT 'query',
+		display_type TEXT NOT NULL DEFAULT 'carousel',
 		query_type TEXT,
 		genre TEXT,
 		curated_list_id INTEGER,
@@ -194,6 +195,47 @@ func (d *DB) migrate() error {
 		FOREIGN KEY (curated_list_id) REFERENCES curated_lists(id) ON DELETE SET NULL
 	);
 
+	-- Analytics/views tracking
+	CREATE TABLE IF NOT EXISTS content_views (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		content_type TEXT NOT NULL,          -- movie, series, episode
+		content_id INTEGER NOT NULL,
+		imdb_code TEXT,
+		device_id TEXT,                      -- anonymous device identifier
+		view_date DATE NOT NULL,             -- date only for daily aggregation
+		view_count INTEGER DEFAULT 1,        -- views per day per device
+		watch_duration INTEGER DEFAULT 0,    -- seconds watched
+		completed INTEGER DEFAULT 0,         -- 1 if watched >90%
+		quality TEXT,                        -- 720p, 1080p, 2160p, etc.
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(content_type, content_id, device_id, view_date)
+	);
+
+	-- Daily aggregated stats (for faster Top 10 queries)
+	CREATE TABLE IF NOT EXISTS content_stats_daily (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		content_type TEXT NOT NULL,
+		content_id INTEGER NOT NULL,
+		stat_date DATE NOT NULL,
+		view_count INTEGER DEFAULT 0,
+		unique_viewers INTEGER DEFAULT 0,
+		total_watch_time INTEGER DEFAULT 0,
+		completions INTEGER DEFAULT 0,
+		UNIQUE(content_type, content_id, stat_date)
+	);
+
+	-- Active streams tracking (for real-time "Active Now" count)
+	CREATE TABLE IF NOT EXISTS active_streams (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		device_id TEXT NOT NULL UNIQUE,
+		content_type TEXT NOT NULL,
+		content_id INTEGER,
+		imdb_code TEXT,
+		quality TEXT,
+		started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_heartbeat DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	-- Create indexes
 	CREATE INDEX IF NOT EXISTS idx_movies_imdb ON movies(imdb_code);
 	CREATE INDEX IF NOT EXISTS idx_movies_year ON movies(year);
@@ -203,6 +245,10 @@ func (d *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_series_imdb ON series(imdb_code);
 	CREATE INDEX IF NOT EXISTS idx_episodes_series ON episodes(series_id);
 	CREATE INDEX IF NOT EXISTS idx_home_sections_order ON home_sections(display_order);
+	CREATE INDEX IF NOT EXISTS idx_content_views_date ON content_views(view_date);
+	CREATE INDEX IF NOT EXISTS idx_content_views_content ON content_views(content_type, content_id);
+	CREATE INDEX IF NOT EXISTS idx_content_stats_date ON content_stats_daily(stat_date);
+	CREATE INDEX IF NOT EXISTS idx_content_stats_content ON content_stats_daily(content_type, content_id);
 	`
 
 	_, err := d.Exec(schema)
@@ -235,6 +281,7 @@ func (d *DB) migrate() error {
 		"ALTER TABLE series ADD COLUMN total_episodes INTEGER DEFAULT 0",
 		"ALTER TABLE series ADD COLUMN imdb_rating REAL",
 		"ALTER TABLE series ADD COLUMN rotten_tomatoes INTEGER",
+		"ALTER TABLE series ADD COLUMN franchise TEXT",
 		// Episode columns
 		"ALTER TABLE episodes ADD COLUMN summary TEXT",
 		"ALTER TABLE episodes ADD COLUMN runtime INTEGER",
@@ -262,6 +309,53 @@ func (d *DB) migrate() error {
 
 	for _, m := range migrations {
 		d.Exec(m) // Ignore errors (column may already exist)
+	}
+
+	// Home sections migrations
+	homeMigrations := []string{
+		"ALTER TABLE home_sections ADD COLUMN display_type TEXT DEFAULT 'carousel'",
+		"ALTER TABLE home_sections ADD COLUMN content_id INTEGER",
+		"ALTER TABLE home_sections ADD COLUMN content_type TEXT",
+		"ALTER TABLE home_sections ADD COLUMN section_type TEXT DEFAULT 'query'",
+		"ALTER TABLE home_sections ADD COLUMN sort_by TEXT DEFAULT 'rating'",
+		"ALTER TABLE home_sections ADD COLUMN order_by TEXT DEFAULT 'desc'",
+		"ALTER TABLE home_sections ADD COLUMN minimum_rating REAL DEFAULT 0",
+		"ALTER TABLE home_sections ADD COLUMN limit_count INTEGER DEFAULT 10",
+	}
+	for _, m := range homeMigrations {
+		d.Exec(m)
+	}
+
+	// Analytics migrations
+	analyticsMigrations := []string{
+		"ALTER TABLE content_views ADD COLUMN quality TEXT",
+	}
+	for _, m := range analyticsMigrations {
+		d.Exec(m)
+	}
+
+	// Rich movie data migrations (from IMDB API)
+	richMovieMigrations := []string{
+		"ALTER TABLE movies ADD COLUMN director TEXT",
+		"ALTER TABLE movies ADD COLUMN writers TEXT",        // JSON array
+		"ALTER TABLE movies ADD COLUMN cast_json TEXT",      // JSON array with full cast info
+		"ALTER TABLE movies ADD COLUMN budget TEXT",
+		"ALTER TABLE movies ADD COLUMN box_office_gross TEXT",
+		"ALTER TABLE movies ADD COLUMN country TEXT",
+		"ALTER TABLE movies ADD COLUMN awards TEXT",
+		"ALTER TABLE movies ADD COLUMN all_images TEXT",     // JSON array of image URLs
+	}
+	for _, m := range richMovieMigrations {
+		d.Exec(m)
+	}
+
+	// Coming soon status migrations
+	comingSoonMigrations := []string{
+		"ALTER TABLE movies ADD COLUMN status TEXT DEFAULT 'available'",  // 'available' or 'coming_soon'
+		"ALTER TABLE movies ADD COLUMN release_date TEXT",                 // YYYY-MM-DD format
+	}
+	for _, m := range comingSoonMigrations {
+		d.Exec(m)
 	}
 
 	return nil

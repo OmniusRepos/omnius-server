@@ -6,14 +6,16 @@ import (
 
 	"torrent-server/database"
 	"torrent-server/models"
+	"torrent-server/services"
 )
 
 type RatingsHandler struct {
-	db *database.DB
+	db          *database.DB
+	syncService *services.SyncService
 }
 
-func NewRatingsHandler(db *database.DB) *RatingsHandler {
-	return &RatingsHandler{db: db}
+func NewRatingsHandler(db *database.DB, syncService *services.SyncService) *RatingsHandler {
+	return &RatingsHandler{db: db, syncService: syncService}
 }
 
 // GetRatings handles POST /api/v2/get_ratings
@@ -38,38 +40,54 @@ func (h *RatingsHandler) GetRatings(w http.ResponseWriter, r *http.Request) {
 }
 
 // SyncMovie handles POST /api/v2/sync_movie
-// Receives a movie from client and saves to local DB
+// Receives IMDB code and fetches full movie data from providers
 func (h *RatingsHandler) SyncMovie(w http.ResponseWriter, r *http.Request) {
-	var movie models.Movie
-	if err := json.NewDecoder(r.Body).Decode(&movie); err != nil {
+	var req struct {
+		ImdbCode  string `json:"imdb_code"`
+		Franchise string `json:"franchise"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "Invalid request body")
 		return
 	}
 
-	// Check if movie exists
-	existing, _ := h.db.GetMovieByIMDB(movie.ImdbCode)
-	if existing != nil {
-		// Update existing
-		movie.ID = existing.ID
-		if err := h.db.UpdateMovie(&movie); err != nil {
-			writeError(w, "Failed to update movie: "+err.Error())
-			return
-		}
-	} else {
-		// Create new
-		if err := h.db.CreateMovie(&movie); err != nil {
-			writeError(w, "Failed to create movie: "+err.Error())
-			return
-		}
+	if req.ImdbCode == "" {
+		writeError(w, "imdb_code is required")
+		return
 	}
 
-	// Also sync torrents if present
-	for _, t := range movie.Torrents {
-		t.MovieID = movie.ID
-		existing, _ := h.db.GetTorrentByHash(t.Hash)
-		if existing == nil {
-			h.db.CreateTorrent(&t)
+	// Check if movie already exists
+	existing, _ := h.db.GetMovieByIMDB(req.ImdbCode)
+	if existing != nil {
+		// Update franchise if provided
+		if req.Franchise != "" && existing.Franchise != req.Franchise {
+			existing.Franchise = req.Franchise
+			h.db.UpdateMovie(existing)
 		}
+		writeSuccess(w, map[string]interface{}{
+			"synced": false,
+			"exists": true,
+			"id":     existing.ID,
+		})
+		return
+	}
+
+	// Use SyncService to fetch complete data (OMDB + torrents)
+	if h.syncService == nil {
+		writeError(w, "Sync service not available")
+		return
+	}
+
+	movie, err := h.syncService.SyncMovie(req.ImdbCode)
+	if err != nil {
+		writeError(w, "Failed to sync movie: "+err.Error())
+		return
+	}
+
+	// Set franchise if provided
+	if req.Franchise != "" {
+		movie.Franchise = req.Franchise
+		h.db.UpdateMovie(movie)
 	}
 
 	writeSuccess(w, map[string]interface{}{
@@ -112,6 +130,67 @@ func (h *RatingsHandler) SyncMovies(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, map[string]interface{}{
 		"synced": synced,
 		"total":  len(movies),
+	})
+}
+
+// RefreshAllMovies handles POST /admin/api/refresh_all_movies
+// Refreshes all movies in the background
+func (h *RatingsHandler) RefreshAllMovies(w http.ResponseWriter, r *http.Request) {
+	if h.syncService == nil {
+		writeError(w, "Sync service not available")
+		return
+	}
+
+	// Start background refresh
+	go h.syncService.RefreshAllMovies()
+
+	writeSuccess(w, map[string]interface{}{
+		"started": true,
+		"message": "Background refresh started",
+	})
+}
+
+// RefreshMovie handles POST /api/v2/refresh_movie
+// Re-fetches movie data from IMDB/OMDB for existing movies
+func (h *RatingsHandler) RefreshMovie(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MovieID  uint   `json:"movie_id"`
+		ImdbCode string `json:"imdb_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "Invalid request body")
+		return
+	}
+
+	// Get existing movie
+	var movie *models.Movie
+	var err error
+	if req.MovieID > 0 {
+		movie, err = h.db.GetMovie(req.MovieID)
+	} else if req.ImdbCode != "" {
+		movie, err = h.db.GetMovieByIMDB(req.ImdbCode)
+	}
+	if err != nil || movie == nil {
+		writeError(w, "Movie not found")
+		return
+	}
+
+	// Use SyncService to refresh data
+	if h.syncService == nil {
+		writeError(w, "Sync service not available")
+		return
+	}
+
+	// Refresh the movie data
+	refreshed, err := h.syncService.RefreshMovie(movie)
+	if err != nil {
+		writeError(w, "Failed to refresh movie: "+err.Error())
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"refreshed": true,
+		"movie":     refreshed,
 	})
 }
 

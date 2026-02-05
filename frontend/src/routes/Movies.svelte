@@ -37,6 +37,9 @@
     yt_trailer_code: '',
     medium_cover_image: '',
     background_image: '',
+    status: 'available',     // 'available' or 'coming_soon'
+    release_date: '',        // YYYY-MM-DD format
+    franchise: '',           // e.g., "Lord of the Rings", "Star Wars"
   };
 
   let torrentForm = {
@@ -118,6 +121,9 @@
       yt_trailer_code: '',
       medium_cover_image: '',
       background_image: '',
+      status: 'available',
+      release_date: '',
+      franchise: '',
     };
     showAddModal = true;
   }
@@ -129,13 +135,16 @@
       title: movie.title,
       year: movie.year,
       rating: movie.rating || 0,
-      runtime: 0, // TODO: add runtime to Movie interface
+      runtime: movie.runtime || 0,
       genres: movie.genres?.join(', ') || '',
-      language: 'en',
+      language: movie.language || 'en',
       summary: movie.summary || '',
-      yt_trailer_code: '',
+      yt_trailer_code: movie.yt_trailer_code || '',
       medium_cover_image: movie.medium_cover_image || '',
-      background_image: '',
+      background_image: movie.background_image || '',
+      status: movie.status || 'available',
+      release_date: movie.release_date || '',
+      franchise: movie.franchise || '',
     };
     showEditModal = true;
   }
@@ -257,6 +266,9 @@
           yt_trailer_code: movieForm.yt_trailer_code,
           medium_cover_image: movieForm.medium_cover_image,
           background_image: movieForm.background_image,
+          status: movieForm.status,
+          release_date: movieForm.release_date,
+          franchise: movieForm.franchise,
         }),
       });
       if (res.ok) {
@@ -283,6 +295,9 @@
         yt_trailer_code: movieForm.yt_trailer_code,
         medium_cover_image: movieForm.medium_cover_image,
         background_image: movieForm.background_image,
+        status: movieForm.status,
+        release_date: movieForm.release_date,
+        franchise: movieForm.franchise,
       });
       showEditModal = false;
       loadMovies();
@@ -303,6 +318,7 @@
   }
 
   let fetchingImdb = false;
+  let imdbError: string | null = null;
   let titleSuggestions: Array<{id: string, title: string, year: string, poster: string, inLibrary?: boolean, movieId?: number}> = [];
   let showSuggestions = false;
   let searchTimeout: ReturnType<typeof setTimeout>;
@@ -436,11 +452,23 @@
   async function fetchFromImdb() {
     if (!movieForm.imdb_code) return;
     fetchingImdb = true;
+    imdbError = null;
     try {
       const res = await fetch(`/admin/api/imdb/title/${movieForm.imdb_code}`);
       if (res.ok) {
         const data = await res.json();
         console.log('IMDB data:', data);
+
+        // Check if it's a TV series
+        const titleType = (data.type || data.titleType || '').toLowerCase();
+        if (titleType.includes('series') || titleType.includes('tv')) {
+          imdbError = `"${data.primaryTitle || data.title}" is a TV Series. Add it in the Series section instead.`;
+          fetchingImdb = false;
+          return;
+        }
+
+        // Clear any previous error
+        imdbError = null;
 
         // Basic info
         movieForm.title = data.primaryTitle || movieForm.title;
@@ -461,6 +489,7 @@
       }
     } catch (err) {
       console.error('Failed to fetch from IMDB:', err);
+      imdbError = 'Failed to fetch from IMDB';
     } finally {
       fetchingImdb = false;
     }
@@ -629,6 +658,9 @@
               </td>
               <td>
                 <a href="/movies/{movie.id}" use:link class="movie-title">{movie.title}</a>
+                {#if movie.status === 'coming_soon'}
+                  <span class="status-badge status-coming-soon">COMING SOON</span>
+                {/if}
               </td>
               <td>{movie.year}</td>
               <td>
@@ -687,6 +719,9 @@
             {fetchingImdb ? 'Fetching...' : 'Fetch'}
           </button>
         </div>
+        {#if imdbError}
+          <p class="form-error">{imdbError}</p>
+        {/if}
       </div>
       <div class="form-group">
         <label class="form-label" for="title">Title *</label>
@@ -780,6 +815,25 @@
       <input type="text" id="yt_trailer" class="form-input" bind:value={movieForm.yt_trailer_code} placeholder="dQw4w9WgXcQ" />
     </div>
     <div class="form-group">
+      <label class="form-label" for="franchise">Franchise</label>
+      <input type="text" id="franchise" class="form-input" bind:value={movieForm.franchise} placeholder="e.g., Lord of the Rings, Star Wars" />
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label checkbox-label">
+          <input type="checkbox" checked={movieForm.status === 'coming_soon'} on:change={(e) => movieForm.status = e.currentTarget.checked ? 'coming_soon' : 'available'} />
+          Coming Soon
+        </label>
+        <p class="form-hint">Mark as upcoming release (no torrents yet)</p>
+      </div>
+      {#if movieForm.status === 'coming_soon'}
+        <div class="form-group">
+          <label class="form-label" for="release_date">Release Date</label>
+          <input type="date" id="release_date" class="form-input" bind:value={movieForm.release_date} />
+        </div>
+      {/if}
+    </div>
+    <div class="form-group">
       <label class="form-label" for="summary">Summary</label>
       <textarea id="summary" class="form-input form-textarea" bind:value={movieForm.summary} rows="3"></textarea>
     </div>
@@ -802,6 +856,9 @@
             {fetchingImdb ? 'Updating...' : 'Update'}
           </button>
         </div>
+        {#if imdbError}
+          <p class="form-error">{imdbError}</p>
+        {/if}
       </div>
       <div class="form-group">
         <label class="form-label" for="edit_title">Title *</label>
@@ -845,6 +902,25 @@
         <label class="form-label" for="edit_background">Background Image URL</label>
         <input type="text" id="edit_background" class="form-input" bind:value={movieForm.background_image} placeholder="https://..." />
       </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="edit_franchise">Franchise</label>
+      <input type="text" id="edit_franchise" class="form-input" bind:value={movieForm.franchise} placeholder="e.g., Lord of the Rings, Star Wars" />
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label checkbox-label">
+          <input type="checkbox" checked={movieForm.status === 'coming_soon'} on:change={(e) => movieForm.status = e.currentTarget.checked ? 'coming_soon' : 'available'} />
+          Coming Soon
+        </label>
+        <p class="form-hint">Mark as upcoming release</p>
+      </div>
+      {#if movieForm.status === 'coming_soon'}
+        <div class="form-group">
+          <label class="form-label" for="edit_release_date">Release Date</label>
+          <input type="date" id="edit_release_date" class="form-input" bind:value={movieForm.release_date} />
+        </div>
+      {/if}
     </div>
     <div class="form-group">
       <label class="form-label" for="edit_summary">Summary</label>
@@ -962,6 +1038,13 @@
 </Modal>
 
 <style>
+  .form-error {
+    color: #ef4444;
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0;
+  }
+
   .poster-placeholder {
     display: flex;
     align-items: center;
@@ -1373,5 +1456,47 @@
 
   .divider::after {
     margin-left: 12px;
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent-primary);
+  }
+
+  .form-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  .status-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 3px 6px;
+    border-radius: 3px;
+    margin-left: 8px;
+    vertical-align: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .status-coming-soon {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
   }
 </style>

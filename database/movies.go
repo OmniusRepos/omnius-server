@@ -21,6 +21,7 @@ type MovieFilter struct {
 	Year          int
 	MaximumYear   int
 	MinimumYear   int
+	Status        string // "available", "coming_soon", or "" for all
 }
 
 func (d *DB) ListMovies(filter MovieFilter) ([]models.Movie, int, error) {
@@ -79,6 +80,12 @@ func (d *DB) ListMovies(filter MovieFilter) ([]models.Movie, int, error) {
 		argNum++
 	}
 
+	if filter.Status != "" {
+		conditions = append(conditions, fmt.Sprintf("COALESCE(m.status, 'available') = $%d", argNum))
+		args = append(args, filter.Status)
+		argNum++
+	}
+
 	whereClause := ""
 	if len(conditions) > 0 {
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
@@ -124,7 +131,8 @@ func (d *DB) ListMovies(filter MovieFilter) ([]models.Movie, int, error) {
 		       m.synopsis, m.yt_trailer_code, m.language, m.background_image,
 		       m.small_cover_image, m.medium_cover_image, m.large_cover_image,
 		       m.date_uploaded, m.date_uploaded_unix,
-		       m.imdb_rating, m.rotten_tomatoes, m.metacritic, m.franchise, m.state, m.ratings_updated_at
+		       m.imdb_rating, m.rotten_tomatoes, m.metacritic, m.franchise, m.state, m.ratings_updated_at,
+		       m.status, m.release_date
 		FROM movies m
 		%s
 		ORDER BY %s %s
@@ -148,6 +156,7 @@ func (d *DB) ListMovies(filter MovieFilter) ([]models.Movie, int, error) {
 		var imdbRating sql.NullFloat64
 		var rottenTomatoes, metacritic sql.NullInt64
 		var franchise, state, ratingsUpdatedAt sql.NullString
+		var status, releaseDate sql.NullString
 
 		err := rows.Scan(
 			&m.ID, &m.ImdbCode, &m.Title, &titleEng, &titleLong, &slug,
@@ -156,6 +165,7 @@ func (d *DB) ListMovies(filter MovieFilter) ([]models.Movie, int, error) {
 			&smallImg, &medImg, &largeImg,
 			&dateUploaded, &dateUploadedUnix,
 			&imdbRating, &rottenTomatoes, &metacritic, &franchise, &state, &ratingsUpdatedAt,
+			&status, &releaseDate,
 		)
 		if err != nil {
 			return nil, 0, err
@@ -179,6 +189,11 @@ func (d *DB) ListMovies(filter MovieFilter) ([]models.Movie, int, error) {
 		m.Franchise = franchise.String
 		m.State = state.String
 		m.RatingsUpdatedAt = ratingsUpdatedAt.String
+		m.Status = status.String
+		if m.Status == "" {
+			m.Status = "available"
+		}
+		m.ReleaseDate = releaseDate.String
 		if imdbRating.Valid {
 			r := float32(imdbRating.Float64)
 			m.ImdbRating = &r
@@ -210,6 +225,9 @@ func (d *DB) GetMovie(id uint) (*models.Movie, error) {
 	var imdbRating sql.NullFloat64
 	var rottenTomatoes, metacritic sql.NullInt64
 	var franchise, state, ratingsUpdatedAt, imdbVotes, contentType, provider sql.NullString
+	var director, writersJSON, castJSON, budget, boxOfficeGross, country, awards, allImagesJSON sql.NullString
+	var mpaRating sql.NullString
+	var status, releaseDate sql.NullString
 
 	err := d.QueryRow(`
 		SELECT id, imdb_code, title, title_english, title_long, slug,
@@ -218,7 +236,9 @@ func (d *DB) GetMovie(id uint) (*models.Movie, error) {
 		       small_cover_image, medium_cover_image, large_cover_image,
 		       date_uploaded, date_uploaded_unix,
 		       imdb_rating, imdb_votes, rotten_tomatoes, metacritic,
-		       franchise, state, ratings_updated_at, content_type, provider
+		       franchise, state, ratings_updated_at, content_type, provider,
+		       director, writers, cast_json, budget, box_office_gross, country, awards, all_images, mpa_rating,
+		       status, release_date
 		FROM movies WHERE id = $1
 	`, id).Scan(
 		&m.ID, &m.ImdbCode, &m.Title, &titleEng, &titleLong, &slug,
@@ -228,6 +248,8 @@ func (d *DB) GetMovie(id uint) (*models.Movie, error) {
 		&dateUploaded, &dateUploadedUnix,
 		&imdbRating, &imdbVotes, &rottenTomatoes, &metacritic,
 		&franchise, &state, &ratingsUpdatedAt, &contentType, &provider,
+		&director, &writersJSON, &castJSON, &budget, &boxOfficeGross, &country, &awards, &allImagesJSON, &mpaRating,
+		&status, &releaseDate,
 	)
 	if err != nil {
 		return nil, err
@@ -254,6 +276,23 @@ func (d *DB) GetMovie(id uint) (*models.Movie, error) {
 	m.ImdbVotes = imdbVotes.String
 	m.ContentType = contentType.String
 	m.Provider = provider.String
+	m.MpaRating = mpaRating.String
+
+	// Rich data fields
+	m.Director = director.String
+	m.ParseWriters(writersJSON.String)
+	m.ParseCast(castJSON.String)
+	m.Budget = budget.String
+	m.BoxOfficeGross = boxOfficeGross.String
+	m.Country = country.String
+	m.Awards = awards.String
+	m.ParseAllImages(allImagesJSON.String)
+	m.Status = status.String
+	if m.Status == "" {
+		m.Status = "available"
+	}
+	m.ReleaseDate = releaseDate.String
+
 	if imdbRating.Valid {
 		r := float32(imdbRating.Float64)
 		m.ImdbRating = &r
@@ -307,21 +346,30 @@ func (d *DB) CreateMovie(m *models.Movie) error {
 		metacritic = &v
 	}
 
+	// Set default status if not provided
+	if m.Status == "" {
+		m.Status = "available"
+	}
+
 	result, err := d.Exec(`
 		INSERT INTO movies (imdb_code, title, title_english, title_long, slug, year, rating, runtime,
 		                    genres, summary, description_full, synopsis, yt_trailer_code, language,
 		                    background_image, small_cover_image, medium_cover_image, large_cover_image,
 		                    date_uploaded, date_uploaded_unix,
 		                    imdb_rating, imdb_votes, rotten_tomatoes, metacritic,
-		                    franchise, state, ratings_updated_at, content_type, provider)
+		                    franchise, state, ratings_updated_at, content_type, provider,
+		                    director, writers, cast_json, budget, box_office_gross, country, awards, all_images, mpa_rating,
+		                    status, release_date)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-		        $21, $22, $23, $24, $25, $26, $27, $28, $29)
+		        $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
 	`, m.ImdbCode, m.Title, m.TitleEnglish, m.TitleLong, m.Slug, m.Year, m.Rating, m.Runtime,
 		m.GenresJSON(), m.Summary, m.DescriptionFull, m.Synopsis, m.YtTrailerCode, m.Language,
 		m.BackgroundImage, m.SmallCoverImage, m.MediumCoverImage, m.LargeCoverImage,
 		m.DateUploaded, m.DateUploadedUnix,
 		imdbRating, m.ImdbVotes, rottenTomatoes, metacritic,
-		m.Franchise, m.State, m.RatingsUpdatedAt, m.ContentType, m.Provider)
+		m.Franchise, m.State, m.RatingsUpdatedAt, m.ContentType, m.Provider,
+		m.Director, m.WritersJSON(), m.CastJSON(), m.Budget, m.BoxOfficeGross, m.Country, m.Awards, m.AllImagesJSON(), m.MpaRating,
+		m.Status, m.ReleaseDate)
 	if err != nil {
 		return err
 	}
@@ -359,14 +407,20 @@ func (d *DB) UpdateMovie(m *models.Movie) error {
 			background_image = $15, small_cover_image = $16, medium_cover_image = $17,
 			large_cover_image = $18,
 			imdb_rating = $19, imdb_votes = $20, rotten_tomatoes = $21, metacritic = $22,
-			franchise = $23, state = $24, ratings_updated_at = $25, content_type = $26, provider = $27
-		WHERE id = $28
+			franchise = $23, state = $24, ratings_updated_at = $25, content_type = $26, provider = $27,
+			director = $28, writers = $29, cast_json = $30, budget = $31, box_office_gross = $32,
+			country = $33, awards = $34, all_images = $35, mpa_rating = $36,
+			status = $37, release_date = $38
+		WHERE id = $39
 	`, m.ImdbCode, m.Title, m.TitleEnglish, m.TitleLong, m.Slug,
 		m.Year, m.Rating, m.Runtime, m.GenresJSON(), m.Summary,
 		m.DescriptionFull, m.Synopsis, m.YtTrailerCode, m.Language,
 		m.BackgroundImage, m.SmallCoverImage, m.MediumCoverImage, m.LargeCoverImage,
 		imdbRating, m.ImdbVotes, rottenTomatoes, metacritic,
-		m.Franchise, m.State, m.RatingsUpdatedAt, m.ContentType, m.Provider, m.ID)
+		m.Franchise, m.State, m.RatingsUpdatedAt, m.ContentType, m.Provider,
+		m.Director, m.WritersJSON(), m.CastJSON(), m.Budget, m.BoxOfficeGross,
+		m.Country, m.Awards, m.AllImagesJSON(), m.MpaRating,
+		m.Status, m.ReleaseDate, m.ID)
 	return err
 }
 
@@ -394,6 +448,38 @@ func (d *DB) GetMovieSuggestions(movieID uint, limit int) ([]models.Movie, error
 	`
 
 	rows, err := d.Query(query, movieID, movie.Year, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var movies []models.Movie
+	for rows.Next() {
+		var id uint
+		if err := rows.Scan(&id); err != nil {
+			continue
+		}
+		if m, err := d.GetMovie(id); err == nil {
+			movies = append(movies, *m)
+		}
+	}
+
+	return movies, nil
+}
+
+// GetFranchiseMovies returns all movies in the same franchise, excluding the current movie
+func (d *DB) GetFranchiseMovies(movieID uint, franchise string) ([]models.Movie, error) {
+	if franchise == "" {
+		return nil, nil
+	}
+
+	query := `
+		SELECT id FROM movies
+		WHERE franchise = $1 AND id != $2
+		ORDER BY year ASC
+	`
+
+	rows, err := d.Query(query, franchise, movieID)
 	if err != nil {
 		return nil, err
 	}

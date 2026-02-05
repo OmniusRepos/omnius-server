@@ -322,6 +322,8 @@
             <div class="tab active" data-tab="movies">Movies</div>
             <div class="tab" data-tab="series">Series</div>
             <div class="tab" data-tab="curated">Curated Lists</div>
+            <div class="tab" data-tab="home">Home Sections</div>
+            <div class="tab" data-tab="analytics">Analytics</div>
             <div class="tab" data-tab="add-movie">Add Movie</div>
             <div class="tab" data-tab="add-series">Add Series</div>
         </div>
@@ -476,6 +478,161 @@
                     </div>
                     <button type="submit">Create List</button>
                 </form>
+            </div>
+        </div>
+
+        <div id="home" class="tab-content">
+            <div class="card">
+                <h2>Home Sections</h2>
+                <p style="color:#888;margin-bottom:20px;">Configure the sections displayed on the home page. Drag to reorder.</p>
+                <div id="homeSectionsContainer">
+                    <p>Loading home sections...</p>
+                </div>
+            </div>
+            <div class="card">
+                <h2>Create Home Section</h2>
+                <form id="createHomeSectionForm">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Section ID</label>
+                            <input name="section_id" placeholder="top-10-movies" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Title</label>
+                            <input name="title" placeholder="Top 10 Movies" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Display Type</label>
+                            <select name="display_type" id="homeSectionDisplayType">
+                                <option value="carousel">Carousel</option>
+                                <option value="top10">Top 10 (Numbered)</option>
+                                <option value="grid">Grid</option>
+                                <option value="featured">Featured</option>
+                                <option value="hero">Hero (Single Item)</option>
+                                <option value="banner">Banner</option>
+                                <option value="slider">Slider</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Section Type</label>
+                            <select name="section_type" id="homeSectionType">
+                                <option value="top_viewed">Top Viewed (Analytics)</option>
+                                <option value="top_rated">Top Rated</option>
+                                <option value="recent">Recently Added</option>
+                                <option value="genre">By Genre</option>
+                                <option value="curated_list">Curated List</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="homeGenreGroup">
+                            <label>Genre</label>
+                            <select name="genre">
+                                <option value="">All Genres</option>
+                                <option value="Action">Action</option>
+                                <option value="Adventure">Adventure</option>
+                                <option value="Animation">Animation</option>
+                                <option value="Comedy">Comedy</option>
+                                <option value="Crime">Crime</option>
+                                <option value="Documentary">Documentary</option>
+                                <option value="Drama">Drama</option>
+                                <option value="Family">Family</option>
+                                <option value="Fantasy">Fantasy</option>
+                                <option value="Horror">Horror</option>
+                                <option value="Music">Music</option>
+                                <option value="Mystery">Mystery</option>
+                                <option value="Romance">Romance</option>
+                                <option value="Sci-Fi">Sci-Fi</option>
+                                <option value="Thriller">Thriller</option>
+                                <option value="War">War</option>
+                                <option value="Western">Western</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="homeCuratedGroup" style="display:none;">
+                            <label>Curated List</label>
+                            <select name="curated_list_id" id="homeCuratedSelect">
+                                <option value="">Select a list...</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="homeContentGroup" style="display:none;">
+                            <label>Content ID (for Hero/Banner)</label>
+                            <input name="content_id" type="number" placeholder="Movie ID">
+                        </div>
+                        <div class="form-group">
+                            <label>Minimum Rating</label>
+                            <input name="minimum_rating" type="number" step="0.1" min="0" max="10" value="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Limit</label>
+                            <input name="limit_count" type="number" value="10" min="1" max="50">
+                        </div>
+                        <div class="form-group">
+                            <label>Sort By</label>
+                            <select name="sort_by">
+                                <option value="view_count">View Count</option>
+                                <option value="rating">Rating</option>
+                                <option value="date_uploaded">Date Added</option>
+                                <option value="year">Year</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Order</label>
+                            <select name="order_by">
+                                <option value="desc">Descending</option>
+                                <option value="asc">Ascending</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Display Order</label>
+                            <input name="display_order" type="number" value="0">
+                        </div>
+                    </div>
+                    <button type="submit">Create Section</button>
+                </form>
+            </div>
+        </div>
+
+        <div id="analytics" class="tab-content">
+            <div class="card">
+                <h2>View Analytics</h2>
+                <div class="stats" id="analyticsStats">
+                    <div class="stat-card">
+                        <h3 id="statTotalViews">-</h3>
+                        <p>Total Views (7d)</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="statUniqueContent">-</h3>
+                        <p>Unique Content</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="statWatchHours">-</h3>
+                        <p>Watch Hours</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="statCompletions">-</h3>
+                        <p>Completions</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <h2>Top 10 Movies (Last 7 Days)</h2>
+                <div id="topMoviesContainer">
+                    <p>Loading top movies...</p>
+                </div>
+            </div>
+            <div class="card">
+                <h2>Top 10 by Genre</h2>
+                <div style="margin-bottom:15px;">
+                    <select id="analyticsGenreSelect" onchange="loadTopByGenre()">
+                        <option value="Action">Action</option>
+                        <option value="Comedy">Comedy</option>
+                        <option value="Drama">Drama</option>
+                        <option value="Horror">Horror</option>
+                        <option value="Sci-Fi">Sci-Fi</option>
+                        <option value="Thriller">Thriller</option>
+                    </select>
+                </div>
+                <div id="topByGenreContainer">
+                    <p>Select a genre to see top movies...</p>
+                </div>
             </div>
         </div>
 

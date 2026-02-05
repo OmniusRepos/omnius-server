@@ -25,6 +25,7 @@ type Series struct {
 	DateAddedUnix   int64     `json:"date_added_unix"`
 	ImdbRating      *float32  `json:"imdb_rating,omitempty"`
 	RottenTomatoes  *int      `json:"rotten_tomatoes,omitempty"`
+	Franchise       string    `json:"franchise,omitempty"`
 }
 
 // GenresJSON returns genres as JSON string for database storage

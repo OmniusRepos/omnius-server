@@ -5,25 +5,32 @@ import (
 )
 
 type HomeSection struct {
-	ID            uint    `json:"id"`
-	SectionID     string  `json:"section_id"`
-	Title         string  `json:"title"`
-	SectionType   string  `json:"section_type"`   // query, curated_list, genre, recent
-	QueryType     string  `json:"query_type"`     // recent, top_rated, random
-	Genre         string  `json:"genre"`          // for genre sections
-	CuratedListID *uint   `json:"curated_list_id"`
+	ID          uint   `json:"id"`
+	SectionID   string `json:"section_id"`
+	Title       string `json:"title"`
+	DisplayType string `json:"display_type"` // hero, carousel, grid, featured, banner
+
+	// For hero/banner - single content item
+	ContentType string `json:"content_type,omitempty"` // movie, series, channel
+	ContentID   *uint  `json:"content_id,omitempty"`   // ID of the specific item
+
+	// For carousel/grid/featured - query-based content
+	SectionType   string  `json:"section_type,omitempty"`   // recent, top_rated, genre, curated_list, query
+	Genre         string  `json:"genre,omitempty"`          // for genre sections
+	CuratedListID *uint   `json:"curated_list_id,omitempty"`
 	SortBy        string  `json:"sort_by"`
 	OrderBy       string  `json:"order_by"`
 	MinimumRating float32 `json:"minimum_rating"`
 	LimitCount    int     `json:"limit_count"`
-	IsActive      bool    `json:"is_active"`
-	DisplayOrder  int     `json:"display_order"`
+
+	IsActive     bool `json:"is_active"`
+	DisplayOrder int  `json:"display_order"`
 }
 
 func (d *DB) ListHomeSections(includeInactive bool) ([]HomeSection, error) {
-	query := `SELECT id, section_id, title, section_type, query_type, genre,
-		curated_list_id, sort_by, order_by, minimum_rating, limit_count,
-		is_active, display_order
+	query := `SELECT id, section_id, title, COALESCE(display_type, 'carousel'),
+		content_type, content_id, section_type, genre, curated_list_id,
+		sort_by, order_by, minimum_rating, limit_count, is_active, display_order
 		FROM home_sections`
 
 	if !includeInactive {
@@ -40,27 +47,35 @@ func (d *DB) ListHomeSections(includeInactive bool) ([]HomeSection, error) {
 	var sections []HomeSection
 	for rows.Next() {
 		var s HomeSection
-		var curatedListID sql.NullInt64
-		var queryType, genre sql.NullString
+		var contentType, sectionType, genre sql.NullString
+		var contentID, curatedListID sql.NullInt64
 
 		err := rows.Scan(
-			&s.ID, &s.SectionID, &s.Title, &s.SectionType, &queryType, &genre,
-			&curatedListID, &s.SortBy, &s.OrderBy, &s.MinimumRating, &s.LimitCount,
+			&s.ID, &s.SectionID, &s.Title, &s.DisplayType,
+			&contentType, &contentID, &sectionType, &genre, &curatedListID,
+			&s.SortBy, &s.OrderBy, &s.MinimumRating, &s.LimitCount,
 			&s.IsActive, &s.DisplayOrder,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		if curatedListID.Valid {
-			id := uint(curatedListID.Int64)
-			s.CuratedListID = &id
+		if contentType.Valid {
+			s.ContentType = contentType.String
 		}
-		if queryType.Valid {
-			s.QueryType = queryType.String
+		if contentID.Valid {
+			id := uint(contentID.Int64)
+			s.ContentID = &id
+		}
+		if sectionType.Valid {
+			s.SectionType = sectionType.String
 		}
 		if genre.Valid {
 			s.Genre = genre.String
+		}
+		if curatedListID.Valid {
+			id := uint(curatedListID.Int64)
+			s.CuratedListID = &id
 		}
 
 		sections = append(sections, s)
@@ -71,41 +86,52 @@ func (d *DB) ListHomeSections(includeInactive bool) ([]HomeSection, error) {
 
 func (d *DB) GetHomeSection(id uint) (*HomeSection, error) {
 	var s HomeSection
-	var curatedListID sql.NullInt64
-	var queryType, genre sql.NullString
+	var contentType, sectionType, genre sql.NullString
+	var contentID, curatedListID sql.NullInt64
 
-	err := d.QueryRow(`SELECT id, section_id, title, section_type, query_type, genre,
-		curated_list_id, sort_by, order_by, minimum_rating, limit_count,
-		is_active, display_order
+	err := d.QueryRow(`SELECT id, section_id, title, COALESCE(display_type, 'carousel'),
+		content_type, content_id, section_type, genre, curated_list_id,
+		sort_by, order_by, minimum_rating, limit_count, is_active, display_order
 		FROM home_sections WHERE id = ?`, id).Scan(
-		&s.ID, &s.SectionID, &s.Title, &s.SectionType, &queryType, &genre,
-		&curatedListID, &s.SortBy, &s.OrderBy, &s.MinimumRating, &s.LimitCount,
+		&s.ID, &s.SectionID, &s.Title, &s.DisplayType,
+		&contentType, &contentID, &sectionType, &genre, &curatedListID,
+		&s.SortBy, &s.OrderBy, &s.MinimumRating, &s.LimitCount,
 		&s.IsActive, &s.DisplayOrder,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	if curatedListID.Valid {
-		id := uint(curatedListID.Int64)
-		s.CuratedListID = &id
+	if contentType.Valid {
+		s.ContentType = contentType.String
 	}
-	if queryType.Valid {
-		s.QueryType = queryType.String
+	if contentID.Valid {
+		id := uint(contentID.Int64)
+		s.ContentID = &id
+	}
+	if sectionType.Valid {
+		s.SectionType = sectionType.String
 	}
 	if genre.Valid {
 		s.Genre = genre.String
+	}
+	if curatedListID.Valid {
+		id := uint(curatedListID.Int64)
+		s.CuratedListID = &id
 	}
 
 	return &s, nil
 }
 
 func (d *DB) CreateHomeSection(s *HomeSection) error {
+	if s.DisplayType == "" {
+		s.DisplayType = "carousel"
+	}
 	result, err := d.Exec(`INSERT INTO home_sections
-		(section_id, title, section_type, query_type, genre, curated_list_id,
+		(section_id, title, display_type, content_type, content_id, section_type, genre, curated_list_id,
 		sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.SectionID, s.Title, s.SectionType, s.QueryType, s.Genre, s.CuratedListID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.SectionID, s.Title, s.DisplayType, s.ContentType, s.ContentID, s.SectionType, s.Genre, s.CuratedListID,
 		s.SortBy, s.OrderBy, s.MinimumRating, s.LimitCount, s.IsActive, s.DisplayOrder,
 	)
 	if err != nil {
@@ -118,13 +144,17 @@ func (d *DB) CreateHomeSection(s *HomeSection) error {
 }
 
 func (d *DB) UpdateHomeSection(s *HomeSection) error {
+	if s.DisplayType == "" {
+		s.DisplayType = "carousel"
+	}
 	_, err := d.Exec(`UPDATE home_sections SET
-		section_id = ?, title = ?, section_type = ?, query_type = ?, genre = ?,
-		curated_list_id = ?, sort_by = ?, order_by = ?, minimum_rating = ?,
-		limit_count = ?, is_active = ?, display_order = ?
+		section_id = ?, title = ?, display_type = ?, content_type = ?, content_id = ?,
+		section_type = ?, genre = ?, curated_list_id = ?, sort_by = ?, order_by = ?,
+		minimum_rating = ?, limit_count = ?, is_active = ?, display_order = ?
 		WHERE id = ?`,
-		s.SectionID, s.Title, s.SectionType, s.QueryType, s.Genre, s.CuratedListID,
-		s.SortBy, s.OrderBy, s.MinimumRating, s.LimitCount, s.IsActive, s.DisplayOrder, s.ID,
+		s.SectionID, s.Title, s.DisplayType, s.ContentType, s.ContentID,
+		s.SectionType, s.Genre, s.CuratedListID, s.SortBy, s.OrderBy,
+		s.MinimumRating, s.LimitCount, s.IsActive, s.DisplayOrder, s.ID,
 	)
 	return err
 }

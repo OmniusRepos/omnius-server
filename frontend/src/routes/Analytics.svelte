@@ -1,72 +1,116 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  interface TimeSeriesPoint {
-    date: string;
-    value: number;
-  }
-
   interface TopItem {
+    id?: number;
     name: string;
     count: number;
     change: number;
+    image?: string;
   }
 
-  // Mock data - will be replaced with API calls
-  let streamStats = {
-    totalStreams: 45892,
-    activeStreams: 127,
-    peakToday: 342,
-    avgDuration: '47 min',
-  };
+  interface QualityItem {
+    quality: string;
+    percentage: number;
+  }
 
-  let bandwidthStats = {
-    totalToday: '2.4 TB',
-    avgPerStream: '1.2 GB',
-    peakRate: '45 Gbps',
-    totalMonth: '48.2 TB',
-  };
+  let loading = $state(true);
+  let selectedPeriod = $state('week');
 
-  let userStats = {
-    uniqueToday: 892,
-    uniqueWeek: 4521,
-    uniqueMonth: 12847,
-    returningRate: '67%',
-  };
+  let streamStats = $state({
+    totalStreams: 0,
+    activeStreams: 0,
+    peakToday: 0,
+    peakTime: '',
+    avgDuration: '0 min',
+    totalChange: 0,
+  });
 
-  let topMovies: TopItem[] = [
-    { name: 'Oppenheimer', count: 1247, change: 12 },
-    { name: 'Barbie', count: 1102, change: -5 },
-    { name: 'The Batman', count: 987, change: 8 },
-    { name: 'Dune: Part Two', count: 876, change: 23 },
-    { name: 'Poor Things', count: 743, change: 15 },
-  ];
+  let bandwidthStats = $state({
+    totalToday: '0 B',
+    avgPerStream: '0 B',
+    peakRate: 'N/A',
+    totalMonth: '0 B',
+    todayChange: 0,
+  });
 
-  let topGenres: TopItem[] = [
-    { name: 'Action', count: 8924, change: 5 },
-    { name: 'Drama', count: 7632, change: 2 },
-    { name: 'Sci-Fi', count: 6547, change: 18 },
-    { name: 'Comedy', count: 5892, change: -3 },
-    { name: 'Thriller', count: 4521, change: 7 },
-  ];
+  let userStats = $state({
+    uniqueToday: 0,
+    uniqueWeek: 0,
+    uniqueMonth: 0,
+    returningRate: '0%',
+    todayChange: 0,
+  });
 
-  let qualityDistribution = [
-    { quality: '4K', percentage: 35 },
-    { quality: '1080p', percentage: 45 },
-    { quality: '720p', percentage: 15 },
-    { quality: 'SD', percentage: 5 },
-  ];
+  let topMovies = $state<TopItem[]>([]);
+  let topGenres = $state<TopItem[]>([]);
+  let qualityDistribution = $state<QualityItem[]>([]);
+  let hourlyActivity = $state<number[]>(new Array(24).fill(0));
 
-  let hourlyActivity: number[] = [
-    12, 8, 5, 3, 2, 4, 15, 45, 78, 92, 85, 95,
-    110, 98, 87, 92, 115, 142, 178, 195, 167, 134, 89, 45
-  ];
+  async function loadAnalytics() {
+    loading = true;
+    try {
+      const response = await fetch(`/admin/api/analytics?period=${selectedPeriod}`, {
+        credentials: 'include'
+      });
+      if (!response.ok) throw new Error('Failed to load analytics');
+
+      const data = await response.json();
+
+      streamStats = {
+        totalStreams: data.stream_stats?.total_streams || 0,
+        activeStreams: data.stream_stats?.active_streams || 0,
+        peakToday: data.stream_stats?.peak_today || 0,
+        peakTime: data.stream_stats?.peak_time || '',
+        avgDuration: data.stream_stats?.avg_duration || '0 min',
+        totalChange: data.stream_stats?.total_change || 0,
+      };
+
+      bandwidthStats = {
+        totalToday: data.bandwidth_stats?.total_today || '0 B',
+        avgPerStream: data.bandwidth_stats?.avg_per_stream || '0 B',
+        peakRate: data.bandwidth_stats?.peak_rate || 'N/A',
+        totalMonth: data.bandwidth_stats?.total_month || '0 B',
+        todayChange: data.bandwidth_stats?.today_change || 0,
+      };
+
+      userStats = {
+        uniqueToday: data.user_stats?.unique_today || 0,
+        uniqueWeek: data.user_stats?.unique_week || 0,
+        uniqueMonth: data.user_stats?.unique_month || 0,
+        returningRate: data.user_stats?.returning_rate || '0%',
+        todayChange: data.user_stats?.today_change || 0,
+      };
+
+      topMovies = data.top_movies || [];
+      topGenres = data.top_genres || [];
+      qualityDistribution = data.quality_distribution || [];
+      hourlyActivity = data.hourly_activity || new Array(24).fill(0);
+    } catch (err) {
+      console.error('Failed to load analytics:', err);
+    } finally {
+      loading = false;
+    }
+  }
+
+  function handlePeriodChange(event: Event) {
+    const select = event.target as HTMLSelectElement;
+    selectedPeriod = select.value;
+    loadAnalytics();
+  }
+
+  onMount(() => {
+    loadAnalytics();
+    // Refresh every 30 seconds
+    const interval = setInterval(loadAnalytics, 30000);
+    return () => { clearInterval(interval); };
+  });
 </script>
 
 <div class="page-header">
   <h1>Analytics</h1>
   <div class="header-actions">
-    <select class="time-select">
+    <select class="time-select" bind:value={selectedPeriod} onchange={handlePeriodChange}>
       <option value="today">Today</option>
       <option value="week">This Week</option>
       <option value="month">This Month</option>
@@ -83,6 +127,13 @@
   </div>
 </div>
 
+{#if loading}
+<div class="loading-overlay">
+  <div class="spinner"></div>
+  <p>Loading analytics...</p>
+</div>
+{/if}
+
 <div class="analytics-grid">
   <!-- Streaming Stats -->
   <section class="stat-section">
@@ -97,7 +148,11 @@
       <div class="stat-card">
         <span class="stat-label">Total Streams</span>
         <span class="stat-value">{streamStats.totalStreams.toLocaleString()}</span>
-        <span class="stat-change positive">+12.5%</span>
+        {#if streamStats.totalChange !== 0}
+        <span class="stat-change" class:positive={streamStats.totalChange > 0} class:negative={streamStats.totalChange < 0}>
+          {streamStats.totalChange > 0 ? '+' : ''}{streamStats.totalChange.toFixed(1)}%
+        </span>
+        {/if}
       </div>
       <div class="stat-card">
         <span class="stat-label">Active Now</span>
@@ -107,7 +162,9 @@
       <div class="stat-card">
         <span class="stat-label">Peak Today</span>
         <span class="stat-value">{streamStats.peakToday}</span>
-        <span class="stat-sublabel">at 8:30 PM</span>
+        {#if streamStats.peakTime}
+        <span class="stat-sublabel">at {streamStats.peakTime}</span>
+        {/if}
       </div>
       <div class="stat-card">
         <span class="stat-label">Avg Duration</span>
