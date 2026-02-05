@@ -208,7 +208,26 @@ func (s *SyncService) syncMovieTorrents(movie *models.Movie) {
 	}
 }
 
-// SyncSeries fetches metadata and torrents for a series
+// SyncSeriesWithData creates a series with provided metadata
+func (s *SyncService) SyncSeriesWithData(series *models.Series) (*models.Series, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check if series already exists
+	existing, err := s.db.GetSeriesByIMDB(series.ImdbCode)
+	if err == nil && existing != nil {
+		return existing, nil
+	}
+
+	if err := s.db.CreateSeries(series); err != nil {
+		return nil, err
+	}
+
+	log.Printf("[SyncSeries] Created series: %s (ID: %d)", series.Title, series.ID)
+	return series, nil
+}
+
+// SyncSeries fetches metadata and torrents for a series (legacy, just creates basic entry)
 func (s *SyncService) SyncSeries(imdbCode string) (*models.Series, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -219,8 +238,6 @@ func (s *SyncService) SyncSeries(imdbCode string) (*models.Series, error) {
 		return existing, nil
 	}
 
-	// For now, just create a basic series entry
-	// In production, you'd fetch from TMDB or similar
 	series := &models.Series{
 		ImdbCode: imdbCode,
 		Status:   "ongoing",

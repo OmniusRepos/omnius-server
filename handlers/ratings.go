@@ -97,23 +97,21 @@ func (h *RatingsHandler) SyncMovie(w http.ResponseWriter, r *http.Request) {
 }
 
 // SyncSeries handles POST /api/v2/sync_series
-// Syncs a TV series from OMDB + EZTV by IMDB code
+// Syncs a TV series - accepts full series data from frontend
 func (h *RatingsHandler) SyncSeries(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ImdbCode string `json:"imdb_code"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var series models.Series
+	if err := json.NewDecoder(r.Body).Decode(&series); err != nil {
 		writeError(w, "Invalid request body")
 		return
 	}
 
-	if req.ImdbCode == "" {
+	if series.ImdbCode == "" {
 		writeError(w, "imdb_code is required")
 		return
 	}
 
 	// Check if series already exists
-	existing, _ := h.db.GetSeriesByIMDB(req.ImdbCode)
+	existing, _ := h.db.GetSeriesByIMDB(series.ImdbCode)
 	if existing != nil {
 		writeSuccess(w, map[string]interface{}{
 			"synced": false,
@@ -123,10 +121,9 @@ func (h *RatingsHandler) SyncSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use SyncService to fetch and create the series
-	series, err := h.syncService.SyncSeries(req.ImdbCode)
-	if err != nil {
-		writeError(w, "Failed to sync series: "+err.Error())
+	// Create the series with provided data
+	if err := h.db.CreateSeries(&series); err != nil {
+		writeError(w, "Failed to create series: "+err.Error())
 		return
 	}
 
