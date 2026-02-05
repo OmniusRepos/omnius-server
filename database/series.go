@@ -215,7 +215,7 @@ func (d *DB) CreateEpisode(e *models.Episode) error {
 func (d *DB) GetEpisodeTorrents(episodeID uint) ([]models.EpisodeTorrent, error) {
 	rows, err := d.Query(`
 		SELECT id, episode_id, COALESCE(series_id, 0), COALESCE(season_number, 0), COALESCE(episode_number, 0),
-		       hash, quality, video_codec, seeds, peers, size, size_bytes, COALESCE(file_index, -1), release_group,
+		       hash, quality, video_codec, COALESCE(seeds, 0), COALESCE(peers, 0), size, COALESCE(size_bytes, 0), COALESCE(file_index, -1), release_group,
 		       COALESCE(date_uploaded, ''), COALESCE(date_uploaded_unix, 0)
 		FROM episode_torrents WHERE episode_id = $1
 	`, episodeID)
