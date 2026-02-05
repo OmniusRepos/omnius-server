@@ -1,0 +1,6 @@
+name: torrent-server
+server: bp.common.al
+port: 8080
+build:
+    dockerfile: Dockerfile
+    context: .
