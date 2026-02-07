@@ -12,15 +12,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"torrent-server/database"
 	"torrent-server/services"
 )
 
 type StreamHandler struct {
-	torrentService *services.TorrentService
+	torrentService  *services.TorrentService
+	subtitleService *services.SubtitleService
+	db              *database.DB
 }
 
-func NewStreamHandler(ts *services.TorrentService) *StreamHandler {
-	return &StreamHandler{torrentService: ts}
+func NewStreamHandler(ts *services.TorrentService, ss *services.SubtitleService, db *database.DB) *StreamHandler {
+	return &StreamHandler{torrentService: ts, subtitleService: ss, db: db}
 }
 
 // Stream handles GET /stream/{infoHash}/{fileIndex}
@@ -219,6 +222,27 @@ func (h *StreamHandler) StartStream(w http.ResponseWriter, r *http.Request) {
 		"total_size": file.Length(),
 		"file_index": fileIndex,
 	})
+
+	// Extract subtitles from torrent in background
+	if h.subtitleService != nil && h.db != nil {
+		go func() {
+			imdbCode, err := h.db.GetIMDBByHash(req.Hash)
+			if err != nil || imdbCode == "" {
+				return
+			}
+			// Skip if we already have torrent-sourced subtitles for this movie
+			existing, _ := h.db.GetSubtitlesByIMDB(imdbCode, "")
+			for _, s := range existing {
+				if s.Source == "torrent" {
+					return
+				}
+			}
+			count := h.subtitleService.ExtractSubtitlesFromTorrent(t, h.torrentService, imdbCode)
+			if count > 0 {
+				log.Printf("[Stream] Extracted %d subtitles from torrent for %s", count, imdbCode)
+			}
+		}()
+	}
 }
 
 // StreamStatus handles GET /api/v2/stream/status?hash={hash}

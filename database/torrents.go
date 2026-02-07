@@ -106,6 +106,17 @@ func (d *DB) DeleteTorrent(id uint) error {
 	return err
 }
 
+// GetIMDBByHash looks up the IMDB code for a torrent by its info hash.
+func (d *DB) GetIMDBByHash(hash string) (string, error) {
+	var imdbCode string
+	err := d.QueryRow(`
+		SELECT m.imdb_code FROM torrents t
+		JOIN movies m ON m.id = t.movie_id
+		WHERE t.hash = $1
+	`, hash).Scan(&imdbCode)
+	return imdbCode, err
+}
+
 func (d *DB) DeleteTorrentsByMovie(movieID uint) error {
 	_, err := d.Exec("DELETE FROM torrents WHERE movie_id = $1", movieID)
 	return err

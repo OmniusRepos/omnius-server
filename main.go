@@ -112,8 +112,7 @@ func main() {
 
 	// Initialize handlers
 	apiHandler := handlers.NewAPIHandler(db)
-	streamHandler := handlers.NewStreamHandler(torrentService)
-	stremioHandler := handlers.NewStremioHandler(db, torrentService, getBaseURL(cfg.Port))
+	streamHandler := handlers.NewStreamHandler(torrentService, subtitleService, db)
 	adminHandler := handlers.NewAdminHandler(db, torrentService)
 	adminHandler.SetTemplates(templates)
 	subtitleHandler := handlers.NewSubtitleHandler(subtitleService, db)
@@ -233,11 +232,6 @@ func main() {
 		r.Get("/imdb/search", imdbHandler.Search)
 		r.Get("/imdb/title/{imdbCode}", imdbHandler.Title)
 	})
-
-	// Stremio addon (public)
-	r.Get("/manifest.json", stremioHandler.Manifest)
-	r.Get("/catalog/{type}/{id}", stremioHandler.Catalog)
-	r.Get("/stream/{type}/{id}", stremioHandler.Stream)
 
 	// Video streaming (public)
 	r.Get("/stream/{infoHash}/{fileIndex}", streamHandler.Stream)
@@ -527,8 +521,7 @@ func main() {
 	serverAddr := ":" + cfg.Port
 	log.Printf("Starting Torrent Server on http://localhost%s", serverAddr)
 	log.Printf("Admin UI: http://localhost%s/admin", serverAddr)
-	log.Printf("Stremio Manifest: http://localhost%s/manifest.json", serverAddr)
-	log.Printf("YTS API: http://localhost%s/api/v2/list_movies.json", serverAddr)
+	log.Printf("API: http://localhost%s/api/v2/list_movies.json", serverAddr)
 
 	// Handle graceful shutdown
 	go func() {
@@ -562,14 +555,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-func getBaseURL(port string) string {
-	// In production, this should be configured via environment variable
-	if baseURL := os.Getenv("BASE_URL"); baseURL != "" {
-		return baseURL
-	}
-	return fmt.Sprintf("http://localhost:%s", port)
 }
 
 // serveSPA serves the Svelte SPA from the embedded static/admin directory

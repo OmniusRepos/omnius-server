@@ -11,8 +11,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anacrolix/torrent"
 
 	"torrent-server/database"
 	"torrent-server/models"
@@ -114,6 +117,115 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 
 	log.Printf("[SubtitleSync] Stored %d subtitles for %s", stored, imdbCode)
 	return stored, nil
+}
+
+// ExtractSubtitlesFromTorrent reads subtitle files (.srt, .ass, etc.) from a loaded torrent
+// and stores them in the DB. Returns the number of subtitles extracted.
+func (s *SubtitleService) ExtractSubtitlesFromTorrent(t *torrent.Torrent, ts *TorrentService, imdbCode string) int {
+	if s.db == nil || t == nil || imdbCode == "" {
+		return 0
+	}
+
+	subtitleExts := map[string]bool{
+		".srt": true, ".vtt": true, ".ass": true, ".ssa": true, ".sub": true,
+	}
+
+	files := t.Files()
+	extracted := 0
+
+	for i, f := range files {
+		ext := strings.ToLower(filepath.Ext(f.Path()))
+		if !subtitleExts[ext] {
+			continue
+		}
+
+		name := filepath.Base(f.Path())
+		log.Printf("[SubtitleExtract] Found subtitle in torrent: %s (%d bytes)", name, f.Length())
+
+		// Skip very large files (>5MB) - not a real subtitle
+		if f.Length() > 5*1024*1024 {
+			continue
+		}
+
+		reader, _, err := ts.GetFileReader(t, i)
+		if err != nil {
+			log.Printf("[SubtitleExtract] Failed to get reader for %s: %v", name, err)
+			continue
+		}
+
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			log.Printf("[SubtitleExtract] Failed to read %s: %v", name, err)
+			continue
+		}
+
+		// Detect language from filename (e.g., "Movie.eng.srt", "Movie.English.srt")
+		lang, langName := detectLanguageFromFilename(name)
+
+		vtt := convertToVTT(string(data))
+
+		storedSub := &models.StoredSubtitle{
+			ImdbCode:     imdbCode,
+			Language:     lang,
+			LanguageName: langName,
+			ReleaseName:  name,
+			Source:       "torrent",
+			VTTContent:   vtt,
+		}
+		if err := s.db.CreateSubtitle(storedSub); err != nil {
+			log.Printf("[SubtitleExtract] Failed to store %s: %v", name, err)
+			continue
+		}
+		extracted++
+		log.Printf("[SubtitleExtract] Stored subtitle: %s (lang=%s)", name, lang)
+	}
+
+	return extracted
+}
+
+// detectLanguageFromFilename tries to detect subtitle language from the filename.
+func detectLanguageFromFilename(filename string) (string, string) {
+	name := strings.ToLower(filename)
+	// Remove extension
+	name = strings.TrimSuffix(name, filepath.Ext(name))
+	parts := strings.Split(name, ".")
+
+	langMap := map[string][2]string{
+		"eng": {"en", "English"}, "english": {"en", "English"},
+		"spa": {"es", "Spanish"}, "spanish": {"es", "Spanish"},
+		"fre": {"fr", "French"}, "french": {"fr", "French"},
+		"ger": {"de", "German"}, "german": {"de", "German"},
+		"ita": {"it", "Italian"}, "italian": {"it", "Italian"},
+		"por": {"pt", "Portuguese"}, "portuguese": {"pt", "Portuguese"},
+		"rus": {"ru", "Russian"}, "russian": {"ru", "Russian"},
+		"chi": {"zh", "Chinese"}, "chinese": {"zh", "Chinese"},
+		"jpn": {"ja", "Japanese"}, "japanese": {"ja", "Japanese"},
+		"kor": {"ko", "Korean"}, "korean": {"ko", "Korean"},
+		"ara": {"ar", "Arabic"}, "arabic": {"ar", "Arabic"},
+		"dut": {"nl", "Dutch"}, "dutch": {"nl", "Dutch"},
+		"pol": {"pl", "Polish"}, "polish": {"pl", "Polish"},
+		"tur": {"tr", "Turkish"}, "turkish": {"tr", "Turkish"},
+		"swe": {"sv", "Swedish"}, "swedish": {"sv", "Swedish"},
+		"nor": {"no", "Norwegian"}, "norwegian": {"no", "Norwegian"},
+		"dan": {"da", "Danish"}, "danish": {"da", "Danish"},
+		"fin": {"fi", "Finnish"}, "finnish": {"fi", "Finnish"},
+		"alb": {"sq", "Albanian"}, "albanian": {"sq", "Albanian"},
+		"sqi": {"sq", "Albanian"},
+		"en":  {"en", "English"}, "es": {"es", "Spanish"},
+		"fr":  {"fr", "French"}, "de": {"de", "German"},
+		"it":  {"it", "Italian"}, "pt": {"pt", "Portuguese"},
+		"ru":  {"ru", "Russian"}, "sq": {"sq", "Albanian"},
+	}
+
+	// Check parts from the end (language tag is usually last before extension)
+	for i := len(parts) - 1; i >= 0; i-- {
+		if match, ok := langMap[parts[i]]; ok {
+			return match[0], match[1]
+		}
+	}
+
+	// Default to English (most common in torrents)
+	return "en", "English"
 }
 
 // Subtitle represents a single subtitle result

@@ -1,6 +1,17 @@
 <script lang="ts">
   const endpoints = [
     {
+      category: 'Configuration',
+      items: [
+        {
+          method: 'GET',
+          path: '/api/v2/config.json',
+          description: 'Get enabled services configuration. Returns which services (Movies, TV Shows, Live TV) are active.',
+          params: [],
+        },
+      ],
+    },
+    {
       category: 'Movies',
       items: [
         {
@@ -39,11 +50,225 @@
             { name: 'movie_id', type: 'int', description: 'Movie ID (required)' },
           ],
         },
+        {
+          method: 'GET',
+          path: '/api/v2/franchise_movies.json',
+          description: 'Get all movies in a franchise/series (e.g. all Harry Potter movies)',
+          params: [
+            { name: 'movie_id', type: 'int', description: 'Movie ID (required)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/check_availability',
+          description: 'Check if a movie exists by IMDB code',
+          params: [
+            { name: 'imdb_code', type: 'string', description: 'IMDB code (required)' },
+          ],
+        },
       ],
     },
     {
-      category: 'Curated Lists',
+      category: 'TV Series',
       items: [
+        {
+          method: 'GET',
+          path: '/api/v2/list_series.json',
+          description: 'List all TV series with filtering and pagination',
+          params: [
+            { name: 'limit', type: 'int', description: 'Number of results (default: 20)' },
+            { name: 'page', type: 'int', description: 'Page number (default: 1)' },
+            { name: 'query_term', type: 'string', description: 'Search term' },
+            { name: 'genre', type: 'string', description: 'Filter by genre' },
+            { name: 'sort_by', type: 'string', description: 'Sort field (title, year, rating)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/series_details.json',
+          description: 'Get detailed information about a TV series',
+          params: [
+            { name: 'series_id', type: 'int', description: 'Series ID (required)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/season_episodes.json',
+          description: 'Get episodes for a specific season',
+          params: [
+            { name: 'series_id', type: 'int', description: 'Series ID (required)' },
+            { name: 'season', type: 'int', description: 'Season number (required)' },
+          ],
+        },
+      ],
+    },
+    {
+      category: 'Live TV / Channels',
+      items: [
+        {
+          method: 'GET',
+          path: '/api/v2/list_channels.json',
+          description: 'List channels with filtering and pagination',
+          params: [
+            { name: 'limit', type: 'int', description: 'Number of results (default: 50)' },
+            { name: 'page', type: 'int', description: 'Page number (default: 1)' },
+            { name: 'country', type: 'string', description: 'Filter by country code (e.g. US, AL)' },
+            { name: 'category', type: 'string', description: 'Filter by category' },
+            { name: 'query', type: 'string', description: 'Search by channel name' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/channel_details.json',
+          description: 'Get details for a specific channel',
+          params: [
+            { name: 'id', type: 'string', description: 'Channel ID (required)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/channel_countries.json',
+          description: 'List all countries with channel counts',
+          params: [],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/channel_categories.json',
+          description: 'List all channel categories with counts',
+          params: [],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/channels_by_country.json',
+          description: 'Get channels for a specific country',
+          params: [
+            { name: 'country', type: 'string', description: 'Country code (required)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/channel_epg.json',
+          description: 'Get EPG (Electronic Program Guide) for a channel',
+          params: [
+            { name: 'channel_id', type: 'string', description: 'Channel ID (required)' },
+          ],
+        },
+      ],
+    },
+    {
+      category: 'Subtitles',
+      items: [
+        {
+          method: 'GET',
+          path: '/api/v2/subtitles/search',
+          description: 'Search subtitles by IMDB ID. Returns from local DB first, falls back to external API.',
+          params: [
+            { name: 'imdb_id', type: 'string', description: 'IMDB code (required)' },
+            { name: 'languages', type: 'string', description: 'Comma-separated language codes (e.g. en,es)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/subtitles/search_by_filename',
+          description: 'Search subtitles by release filename',
+          params: [
+            { name: 'filename', type: 'string', description: 'Release filename (required)' },
+            { name: 'languages', type: 'string', description: 'Comma-separated language codes' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/subtitles/stored/{id}',
+          description: 'Serve a stored subtitle as VTT content directly from DB',
+          params: [
+            { name: 'id', type: 'int', description: 'Stored subtitle ID (required, in URL)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/subtitles/download',
+          description: 'Download and convert a subtitle from external URL to VTT',
+          params: [
+            { name: 'url', type: 'string', description: 'Subtitle download URL (required, URL-encoded)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/subtitle_languages',
+          description: 'Get list of supported subtitle languages',
+          params: [],
+        },
+      ],
+    },
+    {
+      category: 'Streaming',
+      items: [
+        {
+          method: 'POST',
+          path: '/api/v2/stream/start',
+          description: 'Start streaming a torrent. Loads the torrent and returns a stream URL. Also extracts embedded subtitles.',
+          params: [
+            { name: 'hash', type: 'string', description: 'Torrent info hash (required, in body)' },
+            { name: 'file_index', type: 'int', description: 'File index (optional, auto-selects largest video)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/stream/status',
+          description: 'Get download progress for an active stream',
+          params: [
+            { name: 'hash', type: 'string', description: 'Torrent info hash (required)' },
+          ],
+        },
+        {
+          method: 'POST',
+          path: '/api/v2/stream/stop',
+          description: 'Stop streaming and remove torrent',
+          params: [
+            { name: 'hash', type: 'string', description: 'Torrent info hash (required, in body)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/stream/{info_hash}/{file_index}',
+          description: 'Stream a video file from a torrent (supports Range requests)',
+          params: [
+            { name: 'info_hash', type: 'string', description: 'Torrent info hash (in URL)' },
+            { name: 'file_index', type: 'int', description: 'File index in the torrent (in URL)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/torrent_files',
+          description: 'List files in a torrent (video, subtitle, etc.)',
+          params: [
+            { name: 'hash', type: 'string', description: 'Torrent info hash (required)' },
+          ],
+        },
+      ],
+    },
+    {
+      category: 'Search',
+      items: [
+        {
+          method: 'GET',
+          path: '/api/v2/search.json',
+          description: 'Unified search across movies, series, and channels',
+          params: [
+            { name: 'query', type: 'string', description: 'Search term (required)' },
+          ],
+        },
+      ],
+    },
+    {
+      category: 'Home & Curated',
+      items: [
+        {
+          method: 'GET',
+          path: '/api/v2/home.json',
+          description: 'Get home page sections with content',
+          params: [],
+        },
         {
           method: 'GET',
           path: '/api/v2/curated_lists.json',
@@ -62,57 +287,134 @@
       ],
     },
     {
-      category: 'Streaming',
+      category: 'IMDB',
       items: [
         {
           method: 'GET',
-          path: '/stream/{info_hash}/{file_index}',
-          description: 'Stream a video file from a torrent',
+          path: '/api/v2/imdb/search',
+          description: 'Search IMDB for movies/series',
           params: [
-            { name: 'info_hash', type: 'string', description: 'Torrent info hash' },
-            { name: 'file_index', type: 'int', description: 'File index in the torrent' },
+            { name: 'q', type: 'string', description: 'Search query (required)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/imdb/title/{imdbCode}',
+          description: 'Get IMDB title details',
+          params: [
+            { name: 'imdbCode', type: 'string', description: 'IMDB code (in URL, e.g. tt0111161)' },
+          ],
+        },
+        {
+          method: 'GET',
+          path: '/api/v2/imdb/images/{imdbCode}',
+          description: 'Get images for an IMDB title',
+          params: [
+            { name: 'imdbCode', type: 'string', description: 'IMDB code (in URL)' },
           ],
         },
       ],
     },
     {
-      category: 'Stremio Addon',
+      category: 'Sync & Ratings',
       items: [
         {
-          method: 'GET',
-          path: '/manifest.json',
-          description: 'Stremio addon manifest',
+          method: 'POST',
+          path: '/api/v2/sync_movie',
+          description: 'Sync a movie by IMDB code (fetches metadata, torrents, subtitles)',
+          params: [
+            { name: 'imdb_code', type: 'string', description: 'IMDB code (required, in body)' },
+          ],
+        },
+        {
+          method: 'POST',
+          path: '/api/v2/sync_movies',
+          description: 'Batch sync multiple movies',
+          params: [
+            { name: 'imdb_codes', type: 'string[]', description: 'Array of IMDB codes (required, in body)' },
+          ],
+        },
+        {
+          method: 'POST',
+          path: '/api/v2/sync_series',
+          description: 'Sync a TV series by IMDB code',
+          params: [
+            { name: 'imdb_code', type: 'string', description: 'IMDB code (required, in body)' },
+          ],
+        },
+        {
+          method: 'POST',
+          path: '/api/v2/refresh_movie',
+          description: 'Refresh metadata and torrents for an existing movie',
+          params: [
+            { name: 'imdb_code', type: 'string', description: 'IMDB code (required, in body)' },
+          ],
+        },
+        {
+          method: 'POST',
+          path: '/api/v2/refresh_series',
+          description: 'Refresh metadata for an existing series',
+          params: [
+            { name: 'imdb_code', type: 'string', description: 'IMDB code (required, in body)' },
+          ],
+        },
+        {
+          method: 'POST',
+          path: '/api/v2/get_ratings',
+          description: 'Get ratings for a list of IMDB codes',
+          params: [
+            { name: 'imdb_codes', type: 'string[]', description: 'Array of IMDB codes (in body)' },
+          ],
+        },
+      ],
+    },
+    {
+      category: 'Analytics',
+      items: [
+        {
+          method: 'POST',
+          path: '/api/v2/analytics/view',
+          description: 'Record a content view',
+          params: [
+            { name: 'content_id', type: 'int', description: 'Movie/series ID (in body)' },
+            { name: 'content_type', type: 'string', description: 'Type: movie or series (in body)' },
+          ],
+        },
+        {
+          method: 'POST',
+          path: '/api/v2/analytics/stream/start',
+          description: 'Record stream start event',
+          params: [],
+        },
+        {
+          method: 'POST',
+          path: '/api/v2/analytics/stream/heartbeat',
+          description: 'Send stream heartbeat (keep-alive)',
+          params: [],
+        },
+        {
+          method: 'POST',
+          path: '/api/v2/analytics/stream/end',
+          description: 'Record stream end event',
           params: [],
         },
         {
           method: 'GET',
-          path: '/catalog/{type}/{id}.json',
-          description: 'Stremio catalog endpoint',
-          params: [
-            { name: 'type', type: 'string', description: 'Content type (movie, series)' },
-            { name: 'id', type: 'string', description: 'Catalog ID' },
-          ],
-        },
-        {
-          method: 'GET',
-          path: '/stream/{type}/{id}.json',
-          description: 'Stremio stream endpoint',
-          params: [
-            { name: 'type', type: 'string', description: 'Content type' },
-            { name: 'id', type: 'string', description: 'IMDb ID' },
-          ],
+          path: '/api/v2/analytics/top-movies',
+          description: 'Get most viewed movies',
+          params: [],
         },
       ],
     },
   ];
 
-  let selectedEndpoint: any = null;
+  let selectedEndpoint: any = $state(null);
 </script>
 
 <div class="page-header">
   <h1>API Documentation</h1>
   <div class="header-actions">
-    <span class="base-url">Base URL: <code>http://localhost:8080</code></span>
+    <span class="base-url">Base URL: <code>{window.location.origin}</code></span>
   </div>
 </div>
 
@@ -125,7 +427,7 @@
           <button
             class="endpoint-link"
             class:active={selectedEndpoint === endpoint}
-            on:click={() => selectedEndpoint = endpoint}
+            onclick={() => selectedEndpoint = endpoint}
           >
             <span class="method {endpoint.method.toLowerCase()}">{endpoint.method}</span>
             <span class="path">{endpoint.path}</span>
@@ -168,7 +470,7 @@
         {/if}
 
         <h3>Example Request</h3>
-        <pre class="code-block">curl "http://localhost:8080{selectedEndpoint.path}{selectedEndpoint.params.length > 0 ? '?' + selectedEndpoint.params.slice(0, 2).map(p => p.name + '=...').join('&') : ''}"</pre>
+        <pre class="code-block">curl "{window.location.origin}{selectedEndpoint.path}{selectedEndpoint.params.length > 0 ? '?' + selectedEndpoint.params.filter(p => !p.description.includes('in body') && !p.description.includes('in URL')).slice(0, 2).map(p => p.name + '=...').join('&') : ''}"</pre>
       </div>
     {:else}
       <div class="welcome-message">
@@ -269,6 +571,7 @@
     padding: 2px 6px;
     border-radius: 4px;
     text-transform: uppercase;
+    flex-shrink: 0;
   }
 
   .method.get {

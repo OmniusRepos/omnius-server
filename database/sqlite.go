@@ -39,6 +39,9 @@ func New(dbPath string) (*DB, error) {
 }
 
 func (d *DB) migrate() error {
+	// Repair any orphaned indexes from previous schema corruption
+	d.repairSchema()
+
 	schema := `
 	-- Movies table (mirrors YTS structure)
 	CREATE TABLE IF NOT EXISTS movies (
@@ -459,4 +462,32 @@ func (d *DB) migrate() error {
 	}
 
 	return nil
+}
+
+// repairSchema drops orphaned indexes whose tables don't exist.
+// This prevents "database disk image is malformed" errors.
+func (d *DB) repairSchema() {
+	rows, err := d.Query("SELECT name, tbl_name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var toDrop []string
+	for rows.Next() {
+		var name, tblName string
+		if err := rows.Scan(&name, &tblName); err != nil {
+			continue
+		}
+		// Check if the table exists
+		var count int
+		err := d.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", tblName).Scan(&count)
+		if err != nil || count == 0 {
+			toDrop = append(toDrop, name)
+		}
+	}
+
+	for _, name := range toDrop {
+		d.Exec("DROP INDEX IF EXISTS " + name)
+	}
 }
