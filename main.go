@@ -106,12 +106,19 @@ func main() {
 		templates = nil
 	}
 
+	// Initialize services
+	subtitleService := services.NewSubtitleServiceWithDB(db)
+	imdbService := services.NewIMDBService()
+
 	// Initialize handlers
 	apiHandler := handlers.NewAPIHandler(db)
 	streamHandler := handlers.NewStreamHandler(torrentService)
 	stremioHandler := handlers.NewStremioHandler(db, torrentService, getBaseURL(cfg.Port))
 	adminHandler := handlers.NewAdminHandler(db, torrentService)
 	adminHandler.SetTemplates(templates)
+	subtitleHandler := handlers.NewSubtitleHandler(subtitleService, db)
+	imdbHandler := handlers.NewIMDBHandler(imdbService)
+	configHandler := handlers.NewConfigHandler(db)
 
 	// Initialize auth middleware
 	auth := authMiddleware.NewAuthMiddleware(cfg.AdminPassword)
@@ -159,6 +166,9 @@ func main() {
 
 	// YTS-compatible API (public)
 	r.Route("/api/v2", func(r chi.Router) {
+		// Server config (client reads this to build sidebar)
+		r.Get("/config.json", configHandler.GetConfig)
+
 		// Home
 		r.Get("/home.json", apiHandler.Home)
 
@@ -183,6 +193,7 @@ func main() {
 		r.Get("/channel_countries.json", channelHandler.ListCountries)
 		r.Get("/channel_categories.json", channelHandler.ListCategories)
 		r.Get("/channels_by_country.json", channelHandler.GetChannelsByCountry)
+		r.Get("/channel_epg.json", channelHandler.GetEPG)
 
 		// Ratings & Sync
 		r.Post("/get_ratings", ratingsHandler.GetRatings)
@@ -203,6 +214,24 @@ func main() {
 		r.Post("/analytics/stream/start", analyticsHandler.StreamStart)
 		r.Post("/analytics/stream/heartbeat", analyticsHandler.StreamHeartbeat)
 		r.Post("/analytics/stream/end", analyticsHandler.StreamEnd)
+
+		// Subtitles
+		r.Get("/subtitles/search", subtitleHandler.Search)
+		r.Get("/subtitles/search_by_filename", subtitleHandler.SearchByFilename)
+		r.Get("/subtitles/download", subtitleHandler.Download)
+		r.Get("/subtitles/stored/{id}", subtitleHandler.ServeStored)
+		r.Get("/subtitle_languages", subtitleHandler.Languages)
+
+		// Stream management
+		r.Post("/stream/start", streamHandler.StartStream)
+		r.Get("/stream/status", streamHandler.StreamStatus)
+		r.Post("/stream/stop", streamHandler.StopStream)
+		r.Get("/torrent_files", streamHandler.ListFiles)
+
+		// IMDB proxy (public)
+		r.Get("/imdb/images/{imdbCode}", imdbHandler.Images)
+		r.Get("/imdb/search", imdbHandler.Search)
+		r.Get("/imdb/title/{imdbCode}", imdbHandler.Title)
 	})
 
 	// Stremio addon (public)
@@ -316,6 +345,23 @@ func main() {
 
 			// Analytics admin API
 			r.Get("/api/analytics", analyticsHandler.GetAnalytics)
+
+			// Subtitles admin API
+			r.Post("/api/subtitles/sync", subtitleHandler.SyncSubtitles)
+			r.Get("/api/subtitles", subtitleHandler.ListStored)
+			r.Delete("/api/subtitles/{id}", subtitleHandler.DeleteStored)
+
+			// Services config admin API
+			r.Get("/api/services", configHandler.AdminListServices)
+			r.Put("/api/services", configHandler.AdminUpdateServices)
+
+			// Channels admin API (IPTV sync)
+			r.Post("/api/channels/sync", channelHandler.SyncIPTV)
+			r.Get("/api/channels/sync/status", channelHandler.SyncStatus)
+			r.Get("/api/channels/stats", channelHandler.ChannelStats)
+			r.Get("/api/channels/settings", channelHandler.GetChannelSettings)
+			r.Put("/api/channels/settings", channelHandler.UpdateM3UURL)
+			r.Delete("/api/channels/{id}", channelHandler.DeleteChannel)
 
 			// Sync/Refresh admin API
 			r.Post("/api/refresh_all_movies", ratingsHandler.RefreshAllMovies)

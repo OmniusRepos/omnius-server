@@ -319,6 +319,139 @@ export async function removeMovieFromList(listId: number, movieId: number) {
   return request(`${API_BASE}/curated/${listId}/movies/${movieId}`, { method: 'DELETE' });
 }
 
+// Channels (IPTV)
+export interface Channel {
+  id: string;
+  name: string;
+  country?: string;
+  languages?: string[];
+  categories?: string[];
+  logo?: string;
+  stream_url?: string;
+  is_nsfw?: boolean;
+  website?: string;
+}
+
+export interface ChannelCountry {
+  code: string;
+  name: string;
+  flag?: string;
+  channel_count?: number;
+}
+
+export interface ChannelCategory {
+  id: string;
+  name: string;
+  channel_count?: number;
+}
+
+export interface ChannelEPG {
+  id: number;
+  channel_id: string;
+  title: string;
+  description?: string;
+  start_time: string;
+  end_time: string;
+}
+
+export async function getChannels(params?: { page?: number; limit?: number; country?: string; category?: string; query_term?: string }) {
+  const query = new URLSearchParams();
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.country) query.set('country', params.country);
+  if (params?.category) query.set('category', params.category);
+  if (params?.query_term) query.set('query_term', params.query_term);
+
+  const res = await request<{ status: string; data: { channels: Channel[]; channel_count: number; limit: number; page_number: number } }>(
+    `${PUBLIC_API}/list_channels.json?${query}`
+  );
+  return { channels: res.data.channels || [], total: res.data.channel_count, limit: res.data.limit, page: res.data.page_number };
+}
+
+export async function getChannelCountries() {
+  const res = await request<{ status: string; data: { countries: ChannelCountry[] } }>(
+    `${PUBLIC_API}/channel_countries.json`
+  );
+  return res.data.countries || [];
+}
+
+export async function getChannelCategories() {
+  const res = await request<{ status: string; data: { categories: ChannelCategory[] } }>(
+    `${PUBLIC_API}/channel_categories.json`
+  );
+  return res.data.categories || [];
+}
+
+export async function getChannelEPG(channelId: string) {
+  const res = await request<{ status: string; data: { epg: ChannelEPG[] } }>(
+    `${PUBLIC_API}/channel_epg.json?channel_id=${channelId}`
+  );
+  return res.data.epg || [];
+}
+
+export async function syncIPTVChannels(m3uUrl?: string) {
+  return request<{ status: string; message: string; m3u_url: string }>(`${API_BASE}/channels/sync`, {
+    method: 'POST',
+    body: JSON.stringify({ m3u_url: m3uUrl || '' }),
+  });
+}
+
+export async function getIPTVSyncStatus() {
+  return request<{
+    running: boolean;
+    phase: string;
+    progress: number;
+    total: number;
+    last_sync?: string;
+    last_error?: string;
+    channels: number;
+    countries: number;
+    categories: number;
+    m3u_url: string;
+  }>(`${API_BASE}/channels/sync/status`);
+}
+
+export async function getChannelStats() {
+  return request<{ channels: number; countries: number; categories: number; with_streams: number }>(
+    `${API_BASE}/channels/stats`
+  );
+}
+
+export async function getChannelSettings() {
+  return request<{ m3u_url: string }>(`${API_BASE}/channels/settings`);
+}
+
+export async function updateChannelSettings(m3uUrl: string) {
+  return request<{ status: string; m3u_url: string }>(`${API_BASE}/channels/settings`, {
+    method: 'PUT',
+    body: JSON.stringify({ m3u_url: m3uUrl }),
+  });
+}
+
+export async function deleteChannel(id: string) {
+  return request(`${API_BASE}/channels/${id}`, { method: 'DELETE' });
+}
+
+// Server Services Config
+export interface ServiceConfig {
+  id: string;
+  label: string;
+  enabled: boolean;
+  icon: string;
+  display_order: number;
+}
+
+export async function getServices() {
+  return request<ServiceConfig[]>(`${API_BASE}/services`);
+}
+
+export async function updateServices(services: ServiceConfig[]) {
+  return request<{ status: string }>(`${API_BASE}/services`, {
+    method: 'PUT',
+    body: JSON.stringify(services),
+  });
+}
+
 // Auth
 export async function logout() {
   window.location.href = '/admin/logout';

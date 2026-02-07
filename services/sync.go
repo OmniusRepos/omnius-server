@@ -13,17 +13,19 @@ import (
 )
 
 type SyncService struct {
-	db        *database.DB
-	providers []providers.TorrentProvider
-	imdb      *IMDBService
-	mu        sync.Mutex
-	running   bool
+	db              *database.DB
+	providers       []providers.TorrentProvider
+	imdb            *IMDBService
+	subtitleService *SubtitleService
+	mu              sync.Mutex
+	running         bool
 }
 
 func NewSyncService(db *database.DB) *SyncService {
 	return &SyncService{
-		db:   db,
-		imdb: NewIMDBService(),
+		db:              db,
+		imdb:            NewIMDBService(),
+		subtitleService: NewSubtitleServiceWithDB(db),
 		providers: []providers.TorrentProvider{
 			providers.NewYTSProvider(),
 			providers.NewEZTVProvider(),
@@ -42,6 +44,7 @@ func (s *SyncService) SyncMovie(imdbCode string) (*models.Movie, error) {
 	if err == nil && existing != nil {
 		// Update torrents
 		s.syncMovieTorrents(existing)
+		go s.syncSubtitles(imdbCode)
 		return existing, nil
 	}
 
@@ -72,6 +75,9 @@ func (s *SyncService) SyncMovie(imdbCode string) (*models.Movie, error) {
 
 	// Fetch torrents
 	s.syncMovieTorrents(movie)
+
+	// Sync subtitles in background
+	go s.syncSubtitles(imdbCode)
 
 	return movie, nil
 }
@@ -216,6 +222,9 @@ func (s *SyncService) RefreshMovie(movie *models.Movie) (*models.Movie, error) {
 
 	// Also sync torrents
 	s.syncMovieTorrents(movie)
+
+	// Sync subtitles in background
+	go s.syncSubtitles(movie.ImdbCode)
 
 	return movie, nil
 }
@@ -384,6 +393,9 @@ func (s *SyncService) RefreshSeries(series *models.Series) (*models.Series, erro
 	// Sync torrents from EZTV
 	s.syncSeriesEpisodeTorrents(series)
 
+	// Sync subtitles in background
+	go s.syncSubtitles(series.ImdbCode)
+
 	return series, nil
 }
 
@@ -530,6 +542,16 @@ func (s *SyncService) StartBackgroundSync(interval time.Duration) {
 			s.syncAll()
 		}
 	}()
+}
+
+func (s *SyncService) syncSubtitles(imdbCode string) {
+	if s.subtitleService == nil {
+		return
+	}
+	_, err := s.subtitleService.SyncSubtitles(imdbCode, "en")
+	if err != nil {
+		log.Printf("[SyncService] Failed to sync subtitles for %s: %v", imdbCode, err)
+	}
 }
 
 func (s *SyncService) syncAll() {

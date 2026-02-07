@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -165,4 +166,161 @@ func (h *StreamHandler) Stats(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"ok","data":%v}`, stats)
+}
+
+// StartStream handles POST /api/v2/stream/start
+// Body: {"hash":"...","file_index":null}
+func (h *StreamHandler) StartStream(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Hash      string `json:"hash"`
+		FileIndex *int   `json:"file_index"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Hash == "" {
+		http.Error(w, "hash required", http.StatusBadRequest)
+		return
+	}
+
+	t, ok := h.torrentService.GetTorrent(req.Hash)
+	if !ok {
+		http.Error(w, "Failed to load torrent", http.StatusNotFound)
+		return
+	}
+
+	fileIndex := -1
+	if req.FileIndex != nil {
+		fileIndex = *req.FileIndex
+	}
+
+	// If no file index specified, find the largest video file
+	if fileIndex < 0 {
+		fileIndex, _ = h.torrentService.FindLargestVideoFile(t)
+	}
+
+	files := t.Files()
+	if fileIndex >= len(files) {
+		http.Error(w, "File index out of range", http.StatusBadRequest)
+		return
+	}
+
+	file := files[fileIndex]
+	fileName := filepath.Base(file.Path())
+
+	// Start prioritized download
+	file.SetPriority(5) // PiecePriorityNow
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"stream_url": fmt.Sprintf("/stream/%s/%d", req.Hash, fileIndex),
+		"file_name":  fileName,
+		"total_size": file.Length(),
+		"file_index": fileIndex,
+	})
+}
+
+// StreamStatus handles GET /api/v2/stream/status?hash={hash}
+func (h *StreamHandler) StreamStatus(w http.ResponseWriter, r *http.Request) {
+	hash := r.URL.Query().Get("hash")
+	if hash == "" {
+		http.Error(w, "hash required", http.StatusBadRequest)
+		return
+	}
+
+	t, ok := h.torrentService.GetTorrent(hash)
+	if !ok {
+		http.Error(w, "Torrent not found", http.StatusNotFound)
+		return
+	}
+
+	stats := t.Stats()
+	totalSize := t.Length()
+	downloaded := t.BytesCompleted()
+	var progress float64
+	if totalSize > 0 {
+		progress = float64(downloaded) / float64(totalSize) * 100
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"downloaded":     downloaded,
+		"total_size":     totalSize,
+		"download_speed": stats.ConnStats.BytesReadData.Int64() / 1024, // KB/s approx
+		"peers":          stats.ActivePeers,
+		"progress":       progress,
+	})
+}
+
+// StopStream handles POST /api/v2/stream/stop
+// Body: {"hash":"..."}
+func (h *StreamHandler) StopStream(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Hash == "" {
+		http.Error(w, "hash required", http.StatusBadRequest)
+		return
+	}
+
+	h.torrentService.RemoveTorrent(req.Hash)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+	})
+}
+
+// ListFiles handles GET /api/v2/torrent_files?hash={hash}
+func (h *StreamHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
+	hash := r.URL.Query().Get("hash")
+	if hash == "" {
+		http.Error(w, "hash required", http.StatusBadRequest)
+		return
+	}
+
+	t, ok := h.torrentService.GetTorrent(hash)
+	if !ok {
+		http.Error(w, "Torrent not found", http.StatusNotFound)
+		return
+	}
+
+	videoExts := map[string]bool{
+		".mp4": true, ".mkv": true, ".avi": true, ".mov": true,
+		".wmv": true, ".flv": true, ".webm": true, ".m4v": true,
+		".mpg": true, ".mpeg": true, ".3gp": true, ".ts": true,
+	}
+	subtitleExts := map[string]bool{
+		".srt": true, ".vtt": true, ".ass": true, ".ssa": true, ".sub": true,
+	}
+
+	type TorrentFile struct {
+		Index      int    `json:"index"`
+		Name       string `json:"name"`
+		Length     int64  `json:"length"`
+		IsVideo    bool   `json:"is_video"`
+		IsSubtitle bool   `json:"is_subtitle"`
+	}
+
+	files := t.Files()
+	result := make([]TorrentFile, 0, len(files))
+	for i, f := range files {
+		name := filepath.Base(f.Path())
+		ext := strings.ToLower(filepath.Ext(name))
+		result = append(result, TorrentFile{
+			Index:      i,
+			Name:       name,
+			Length:     f.Length(),
+			IsVideo:    videoExts[ext],
+			IsSubtitle: subtitleExts[ext],
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }

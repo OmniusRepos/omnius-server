@@ -1,18 +1,26 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 
 	"torrent-server/database"
 	"torrent-server/models"
+	"torrent-server/services"
 )
 
 type ChannelHandler struct {
-	db *database.DB
+	db          *database.DB
+	iptvService *services.IPTVSyncService
 }
 
 func NewChannelHandler(db *database.DB) *ChannelHandler {
-	return &ChannelHandler{db: db}
+	return &ChannelHandler{
+		db:          db,
+		iptvService: services.NewIPTVSyncService(db),
+	}
 }
 
 // ListChannels handles GET /api/v2/list_channels.json
@@ -85,7 +93,7 @@ func (h *ChannelHandler) ListCountries(w http.ResponseWriter, r *http.Request) {
 
 // ListCategories handles GET /api/v2/channel_categories.json
 func (h *ChannelHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
-	categories, err := h.db.ListChannelCategories()
+	categories, err := h.db.GetChannelCountByCategory()
 	if err != nil {
 		writeError(w, "Failed to fetch categories: "+err.Error())
 		return
@@ -124,4 +132,118 @@ func (h *ChannelHandler) GetChannelsByCountry(w http.ResponseWriter, r *http.Req
 	writeSuccess(w, map[string]interface{}{
 		"channels": channels,
 	})
+}
+
+// GetEPG handles GET /api/v2/channel_epg.json?channel_id=...
+func (h *ChannelHandler) GetEPG(w http.ResponseWriter, r *http.Request) {
+	channelID := r.URL.Query().Get("channel_id")
+	if channelID == "" {
+		writeError(w, "channel_id is required")
+		return
+	}
+
+	epg, err := h.db.GetEPG(channelID)
+	if err != nil {
+		writeError(w, "Failed to fetch EPG: "+err.Error())
+		return
+	}
+
+	if epg == nil {
+		epg = []models.ChannelEPG{}
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"epg": epg,
+	})
+}
+
+// --- Admin endpoints ---
+
+// SyncIPTV handles POST /admin/api/channels/sync
+// Accepts optional JSON body: { "m3u_url": "https://..." }
+func (h *ChannelHandler) SyncIPTV(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		M3UURL string `json:"m3u_url"`
+	}
+	json.NewDecoder(r.Body).Decode(&req) // optional body, ignore errors
+
+	if err := h.iptvService.SyncFromM3U(req.M3UURL); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"message": "IPTV sync started from M3U",
+		"m3u_url": services.IPTVM3UURL,
+	})
+}
+
+// UpdateM3UURL handles PUT /admin/api/channels/settings
+func (h *ChannelHandler) UpdateM3UURL(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		M3UURL string `json:"m3u_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.M3UURL == "" {
+		http.Error(w, "m3u_url required", http.StatusBadRequest)
+		return
+	}
+
+	services.IPTVM3UURL = req.M3UURL
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"m3u_url": services.IPTVM3UURL,
+	})
+}
+
+// GetChannelSettings handles GET /admin/api/channels/settings
+func (h *ChannelHandler) GetChannelSettings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"m3u_url": services.IPTVM3UURL,
+	})
+}
+
+// SyncStatus handles GET /admin/api/channels/sync/status
+func (h *ChannelHandler) SyncStatus(w http.ResponseWriter, r *http.Request) {
+	status := h.iptvService.GetStatus()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+// ChannelStats handles GET /admin/api/channels/stats
+func (h *ChannelHandler) ChannelStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.db.GetChannelStats()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]int{})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+// DeleteChannel handles DELETE /admin/api/channels/{id}
+func (h *ChannelHandler) DeleteChannel(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "id required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.db.DeleteChannel(id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

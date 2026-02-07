@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { getServices, updateServices, type ServiceConfig } from '../lib/api/client';
 
   // Tab state
   let activeTab = $state('general');
@@ -17,14 +18,48 @@
   let testResult = $state<{ status: string; message: string } | null>(null);
   let saving = $state(false);
 
+  // Services state
+  let services: ServiceConfig[] = $state([]);
+  let savingServices = $state(false);
+  let servicesMessage = $state<string | null>(null);
+
   // Sync state
   let refreshingMovies = $state(false);
   let refreshingShows = $state(false);
   let syncMessage = $state<string | null>(null);
 
   onMount(async () => {
-    await loadYTSSettings();
+    await Promise.all([loadYTSSettings(), loadServices()]);
   });
+
+  async function loadServices() {
+    try {
+      services = await getServices();
+    } catch (e) {
+      console.error('Failed to load services:', e);
+    }
+  }
+
+  async function saveServices() {
+    savingServices = true;
+    servicesMessage = null;
+    try {
+      await updateServices(services);
+      servicesMessage = 'Services saved! Client apps will update on next load.';
+    } catch (e) {
+      servicesMessage = 'Error: ' + String(e);
+    } finally {
+      savingServices = false;
+    }
+  }
+
+  function toggleService(id: string) {
+    services = services.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s);
+  }
+
+  function updateLabel(id: string, label: string) {
+    services = services.map(s => s.id === id ? { ...s, label } : s);
+  }
 
   async function loadYTSSettings() {
     try {
@@ -143,6 +178,9 @@
 
   <!-- Tabs -->
   <div class="tabs">
+    <button class="tab" class:active={activeTab === 'services'} onclick={() => activeTab = 'services'}>
+      Services
+    </button>
     <button class="tab" class:active={activeTab === 'general'} onclick={() => activeTab = 'general'}>
       General
     </button>
@@ -156,6 +194,65 @@
       Database
     </button>
   </div>
+
+  <!-- Services Tab -->
+  {#if activeTab === 'services'}
+    <div class="card">
+      <h3>Client Services</h3>
+      <p class="text-muted mb-4">
+        Choose which services your server provides. Client apps will show/hide sidebar sections based on this configuration.
+        The client fetches <code>/api/v2/config.json</code> on startup.
+      </p>
+
+      <div class="services-list">
+        {#each services as service}
+          <div class="service-item" class:disabled={!service.enabled}>
+            <div class="service-toggle">
+              <button
+                class="toggle-btn"
+                class:active={service.enabled}
+                onclick={() => toggleService(service.id)}
+              >
+                <span class="toggle-knob"></span>
+              </button>
+            </div>
+            <div class="service-icon">{service.icon === 'movie' ? '🎬' : service.icon === 'tv' ? '📺' : service.icon === 'live' ? '📡' : '📦'}</div>
+            <div class="service-details">
+              <input
+                type="text"
+                class="service-label-input"
+                value={service.label}
+                oninput={(e) => updateLabel(service.id, (e.target as HTMLInputElement).value)}
+              />
+              <span class="service-id text-muted">{service.id}</span>
+            </div>
+          </div>
+        {/each}
+      </div>
+
+      {#if servicesMessage}
+        <div class="sync-message" class:error={servicesMessage.startsWith('Error')}>
+          {servicesMessage}
+        </div>
+      {/if}
+
+      <button
+        class="btn btn-primary mt-4"
+        onclick={saveServices}
+        disabled={savingServices}
+      >
+        {savingServices ? 'Saving...' : 'Save Services'}
+      </button>
+    </div>
+
+    <div class="card mt-4">
+      <h3>API Endpoint</h3>
+      <p class="text-muted mb-4">Client apps connect to this server using the config endpoint:</p>
+      <div class="api-endpoint">
+        <code>{window.location.origin}/api/v2/config.json</code>
+      </div>
+    </div>
+  {/if}
 
   <!-- General Tab -->
   {#if activeTab === 'general'}
@@ -598,5 +695,101 @@
 
   .db-value {
     font-family: monospace;
+  }
+
+  /* Services */
+  .services-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .service-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: var(--bg-tertiary, #1a1a2e);
+    border-radius: 8px;
+    transition: opacity 0.2s;
+  }
+
+  .service-item.disabled {
+    opacity: 0.5;
+  }
+
+  .service-icon {
+    font-size: 1.5rem;
+    width: 36px;
+    text-align: center;
+  }
+
+  .service-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .service-label-input {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-primary, #fff);
+    font-size: 1rem;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+
+  .service-label-input:focus {
+    border-color: var(--accent, #6366f1);
+    outline: none;
+    background: var(--bg-secondary, #0d1117);
+  }
+
+  .service-id {
+    font-size: 0.75rem;
+    padding-left: 8px;
+    font-family: monospace;
+  }
+
+  .toggle-btn {
+    width: 44px;
+    height: 24px;
+    border-radius: 12px;
+    border: none;
+    background: var(--bg-secondary, #0d1117);
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s;
+    padding: 0;
+  }
+
+  .toggle-btn.active {
+    background: var(--accent-green, #22c55e);
+  }
+
+  .toggle-knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: white;
+    transition: transform 0.2s;
+  }
+
+  .toggle-btn.active .toggle-knob {
+    transform: translateX(20px);
+  }
+
+  .api-endpoint {
+    padding: 12px;
+    background: var(--bg-tertiary, #1a1a2e);
+    border-radius: 8px;
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: var(--accent-blue, #3b82f6);
   }
 </style>

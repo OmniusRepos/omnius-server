@@ -358,5 +358,105 @@ func (d *DB) migrate() error {
 		d.Exec(m)
 	}
 
+	// Service config table
+	serviceConfigMigrations := []string{
+		`CREATE TABLE IF NOT EXISTS service_config (
+			id TEXT PRIMARY KEY,
+			label TEXT NOT NULL,
+			enabled INTEGER DEFAULT 1,
+			icon TEXT,
+			display_order INTEGER DEFAULT 0
+		)`,
+	}
+	for _, m := range serviceConfigMigrations {
+		d.Exec(m)
+	}
+
+	// Seed default services if empty
+	var serviceCount int
+	d.QueryRow("SELECT COUNT(*) FROM service_config").Scan(&serviceCount)
+	if serviceCount == 0 {
+		defaultServices := []string{
+			`INSERT INTO service_config (id, label, enabled, icon, display_order) VALUES ('movies', 'Movies', 1, 'movie', 1)`,
+			`INSERT INTO service_config (id, label, enabled, icon, display_order) VALUES ('series', 'TV Shows', 1, 'tv', 2)`,
+			`INSERT INTO service_config (id, label, enabled, icon, display_order) VALUES ('channels', 'Live TV', 0, 'live', 3)`,
+		}
+		for _, s := range defaultServices {
+			d.Exec(s)
+		}
+	}
+
+	// Channels tables (IPTV)
+	channelMigrations := []string{
+		`CREATE TABLE IF NOT EXISTS channels (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			country TEXT,
+			languages TEXT,
+			categories TEXT,
+			logo TEXT,
+			stream_url TEXT,
+			is_nsfw INTEGER DEFAULT 0,
+			website TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_channels_country ON channels(country)",
+		"CREATE INDEX IF NOT EXISTS idx_channels_name ON channels(name)",
+		`CREATE TABLE IF NOT EXISTS channel_countries (
+			code TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			flag TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS channel_categories (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS channel_epg (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			channel_id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			description TEXT,
+			start_time DATETIME NOT NULL,
+			end_time DATETIME NOT NULL,
+			FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_epg_channel ON channel_epg(channel_id)",
+		"CREATE INDEX IF NOT EXISTS idx_epg_time ON channel_epg(start_time, end_time)",
+	}
+	for _, m := range channelMigrations {
+		d.Exec(m)
+	}
+
+	// Channel column additions (for existing tables)
+	channelColumnMigrations := []string{
+		"ALTER TABLE channels ADD COLUMN is_nsfw INTEGER DEFAULT 0",
+		"ALTER TABLE channels ADD COLUMN website TEXT",
+	}
+	for _, m := range channelColumnMigrations {
+		d.Exec(m)
+	}
+
+	// Subtitles table
+	subtitleMigrations := []string{
+		`CREATE TABLE IF NOT EXISTS subtitles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			imdb_code TEXT NOT NULL,
+			language TEXT NOT NULL,
+			language_name TEXT,
+			release_name TEXT,
+			hearing_impaired INTEGER DEFAULT 0,
+			source TEXT,
+			vtt_content TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(imdb_code, language, release_name)
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_subtitles_imdb ON subtitles(imdb_code)",
+		"CREATE INDEX IF NOT EXISTS idx_subtitles_imdb_lang ON subtitles(imdb_code, language)",
+	}
+	for _, m := range subtitleMigrations {
+		d.Exec(m)
+	}
+
 	return nil
 }
