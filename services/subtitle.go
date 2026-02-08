@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -65,10 +66,32 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 
 	stored := 0
 	storedLangs := make(map[string]int)
-
-	// Use SubDL for sync (OpenSubtitles blocks downloads from server IPs)
-	// Query per-language to ensure coverage (bulk query returns max ~10 results total)
 	langs := strings.Split(languages, ",")
+
+	// Phase 1: OpenSubtitles (best quality, uses curl to bypass CDN blocks)
+	for _, lang := range langs {
+		lang = strings.TrimSpace(lang)
+		if lang == "" || storedLangs[lang] >= 3 {
+			continue
+		}
+		osLang := iso2ToOSLang(lang)
+		if osLang == "" {
+			continue
+		}
+		osResult, err := s.searchOpenSubtitlesREST(imdb, osLang)
+		if err != nil {
+			log.Printf("[SubtitleSync] OpenSubtitles error for %s: %v", lang, err)
+			continue
+		}
+		if len(osResult.Subtitles) > 0 {
+			count := s.syncDownloadSubtitles(imdbCode, lang, osResult.Subtitles, 3-storedLangs[lang])
+			storedLangs[lang] += count
+			stored += count
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	// Phase 2: SubDL fills gaps (per-language, uppercase codes)
 	for _, lang := range langs {
 		lang = strings.TrimSpace(lang)
 		if lang == "" || storedLangs[lang] >= 3 {
@@ -76,18 +99,16 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 		}
 		subdlResult, err := s.searchSubDL(imdb, lang)
 		if err != nil {
-			log.Printf("[SubtitleSync] SubDL search error for %s: %v", lang, err)
+			log.Printf("[SubtitleSync] SubDL error for %s: %v", lang, err)
 			continue
 		}
 		if len(subdlResult.Subtitles) == 0 {
-			log.Printf("[SubtitleSync] No SubDL results for %s", lang)
 			continue
 		}
-		need := 3 - storedLangs[lang]
-		count := s.syncDownloadSubtitles(imdbCode, lang, subdlResult.Subtitles, need)
+		count := s.syncDownloadSubtitles(imdbCode, lang, subdlResult.Subtitles, 3-storedLangs[lang])
 		storedLangs[lang] += count
 		stored += count
-		time.Sleep(300 * time.Millisecond) // rate limit
+		time.Sleep(300 * time.Millisecond)
 	}
 
 	log.Printf("[SubtitleSync] Stored %d subtitles for %s", stored, imdbCode)
@@ -378,26 +399,17 @@ func (s *SubtitleService) SearchByFilename(filename string, languages string) (*
 func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 	log.Printf("[SubtitleService] Downloading subtitle from: %s", downloadURL)
 
-	req, err := http.NewRequest("GET", downloadURL, nil)
+	var data []byte
+	var err error
+
+	// Use curl for OpenSubtitles (their download server blocks Go HTTP client from datacenter IPs)
+	if strings.Contains(downloadURL, "opensubtitles.org") {
+		data, err = downloadWithCurl(downloadURL)
+	} else {
+		data, err = s.downloadWithHTTP(downloadURL)
+	}
 	if err != nil {
 		return "", err
-	}
-	// OpenSubtitles download links require a browser-like User-Agent
-	req.Header.Set("User-Agent", "OmniusServer v1.0")
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to download subtitle: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download subtitle: HTTP %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read subtitle bytes: %w", err)
 	}
 
 	log.Printf("[SubtitleService] Downloaded %d bytes", len(data))
@@ -427,6 +439,37 @@ func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 	vtt := convertToVTT(content)
 	log.Printf("[SubtitleService] Converted to VTT (%d chars)", len(vtt))
 	return vtt, nil
+}
+
+// downloadWithCurl uses curl to download files (bypasses Go HTTP client issues with some CDNs)
+func downloadWithCurl(url string) ([]byte, error) {
+	ctx := exec.Command("curl", "-s", "-L", "-f", "--max-time", "15", url)
+	data, err := ctx.Output()
+	if err != nil {
+		return nil, fmt.Errorf("curl download failed: %w", err)
+	}
+	return data, nil
+}
+
+// downloadWithHTTP uses Go's HTTP client for regular downloads
+func (s *SubtitleService) downloadWithHTTP(downloadURL string) ([]byte, error) {
+	req, err := http.NewRequest("GET", downloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "OmniusServer v1.0")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download subtitle: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to download subtitle: HTTP %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
 }
 
 func (s *SubtitleService) searchSubDL(imdbID string, languages string) (*SubtitleSearchResult, error) {

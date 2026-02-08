@@ -7,6 +7,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o main .
 
 FROM alpine:latest
+RUN apk add --no-cache curl
 WORKDIR /app
 COPY --from=builder /app/main /app/main
 COPY --from=builder /app/data /app/data
