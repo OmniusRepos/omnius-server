@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"torrent-server/models"
 )
@@ -12,8 +13,13 @@ func (d *DB) GetSubtitlesByIMDB(imdbCode, language string) ([]models.StoredSubti
 	args := []interface{}{imdbCode}
 
 	if language != "" {
-		query += " AND language = ?"
-		args = append(args, language)
+		langs := strings.Split(language, ",")
+		placeholders := make([]string, len(langs))
+		for i, l := range langs {
+			placeholders[i] = "?"
+			args = append(args, strings.TrimSpace(l))
+		}
+		query += " AND language IN (" + strings.Join(placeholders, ",") + ")"
 	}
 
 	query += " ORDER BY created_at DESC"
