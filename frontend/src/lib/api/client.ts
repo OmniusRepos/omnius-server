@@ -509,6 +509,13 @@ export async function deleteSubtitle(id: number) {
   return request<{ status: string }>(`${API_BASE}/subtitles/${id}`, { method: 'DELETE' });
 }
 
+export async function syncSubtitles(imdbCode: string, languages = 'en') {
+  return request<{ status: string; stored: number; message: string }>(`${API_BASE}/subtitles/sync`, {
+    method: 'POST',
+    body: JSON.stringify({ imdb_code: imdbCode, languages }),
+  });
+}
+
 // Auth
 export async function logout() {
   window.location.href = '/admin/logout';

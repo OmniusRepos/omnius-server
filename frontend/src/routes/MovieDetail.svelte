@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { link, push } from 'svelte-spa-router';
-  import { getMovie, deleteMovie, updateMovie, getMovies, getSubtitles, getSubtitlePreview, deleteSubtitle, type Movie, type StoredSubtitle, type SubtitlePreview } from '../lib/api/client';
+  import { getMovie, deleteMovie, updateMovie, getMovies, getSubtitles, getSubtitlePreview, deleteSubtitle, syncSubtitles, type Movie, type StoredSubtitle, type SubtitlePreview } from '../lib/api/client';
   import Modal from '../lib/components/Modal.svelte';
 
   export let params: { id: string };
@@ -22,6 +22,7 @@
   let subtitlePreview: SubtitlePreview | null = null;
   let loadingPreview = false;
   let expandedTorrentHash: string | null = null;
+  let syncingSubtitles = false;
 
   // Modal states
   let showEditModal = false;
@@ -225,6 +226,19 @@
       subtitles = subtitles.filter(s => s.id !== id);
     } catch (err) {
       console.error('Failed to delete subtitle:', err);
+    }
+  }
+
+  async function handleSyncSubtitles() {
+    if (!movie?.imdb_code) return;
+    syncingSubtitles = true;
+    try {
+      const res = await syncSubtitles(movie.imdb_code);
+      await loadSubtitles();
+    } catch (err) {
+      console.error('Failed to sync subtitles:', err);
+    } finally {
+      syncingSubtitles = false;
     }
   }
 
@@ -782,7 +796,12 @@
     <div class="card torrents-card">
       <div class="torrents-header">
         <h3>Torrents</h3>
-        <button class="btn btn-sm btn-primary" on:click={() => showTorrentModal = true}>ADD TORRENT</button>
+        <div class="torrents-actions">
+          <button class="btn btn-sm btn-secondary" on:click={handleSyncSubtitles} disabled={syncingSubtitles || !movie.imdb_code}>
+            {syncingSubtitles ? 'SYNCING...' : 'SYNC SUBS'}
+          </button>
+          <button class="btn btn-sm btn-primary" on:click={() => showTorrentModal = true}>ADD TORRENT</button>
+        </div>
       </div>
       {#if movie.torrents && movie.torrents.length > 0}
         {#each movie.torrents as torrent}
@@ -1311,6 +1330,11 @@
 
   .torrents-header h3 {
     margin: 0;
+  }
+
+  .torrents-actions {
+    display: flex;
+    gap: 8px;
   }
 
   .torrent-row {

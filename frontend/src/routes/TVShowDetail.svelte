@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { link, push } from 'svelte-spa-router';
-  import { getSeriesDetails, deleteSeries, updateSeries, getSubtitles, getSubtitlePreview, deleteSubtitle, type SeriesDetails, type Episode, type StoredSubtitle, type SubtitlePreview } from '../lib/api/client';
+  import { getSeriesDetails, deleteSeries, updateSeries, getSubtitles, getSubtitlePreview, deleteSubtitle, syncSubtitles, type SeriesDetails, type Episode, type StoredSubtitle, type SubtitlePreview } from '../lib/api/client';
   import Modal from '../lib/components/Modal.svelte';
 
   export let params: { id: string };
@@ -21,6 +21,7 @@
   let showPreviewModal = false;
   let subtitlePreview: SubtitlePreview | null = null;
   let loadingPreview = false;
+  let syncingSubtitles = false;
 
   // Modal states
   let showEditModal = false;
@@ -163,6 +164,19 @@
       subtitles = subtitles.filter(s => s.id !== id);
     } catch (err) {
       console.error('Failed to delete subtitle:', err);
+    }
+  }
+
+  async function handleSyncSubtitles() {
+    if (!series?.imdb_code) return;
+    syncingSubtitles = true;
+    try {
+      await syncSubtitles(series.imdb_code);
+      await loadSubtitles();
+    } catch (err) {
+      console.error('Failed to sync subtitles:', err);
+    } finally {
+      syncingSubtitles = false;
     }
   }
 
@@ -683,9 +697,14 @@
     </div>
 
     <!-- Subtitles Card -->
-    {#if subtitles.length > 0}
-      <div class="card subtitles-card">
+    <div class="card subtitles-card">
+      <div class="subtitles-header">
         <h3>Subtitles ({subtitles.length})</h3>
+        <button class="btn btn-sm btn-secondary" on:click={handleSyncSubtitles} disabled={syncingSubtitles || !series.imdb_code}>
+          {syncingSubtitles ? 'SYNCING...' : 'SYNC SUBS'}
+        </button>
+      </div>
+      {#if subtitles.length > 0}
         {#each subtitles as sub}
           <div class="subtitle-row">
             <span class="subtitle-lang badge">{sub.language_name || sub.language}</span>
@@ -702,8 +721,10 @@
             </div>
           </div>
         {/each}
-      </div>
-    {/if}
+      {:else}
+        <p class="text-muted">No subtitles synced</p>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -1521,7 +1542,7 @@
   }
 
   .subtitles-header h3 {
-    margin: 0;
+    margin: 0 !important;
   }
 
   .subtitle-row {
