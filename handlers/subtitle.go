@@ -24,7 +24,7 @@ func NewSubtitleHandler(ss *services.SubtitleService, db *database.DB) *Subtitle
 }
 
 // Search handles GET /api/v2/subtitles/search?imdb_id={id}&languages={langs}
-// Checks DB first, falls back to external API
+// Returns stored subs from DB, supplements with external API for missing languages
 func (h *SubtitleHandler) Search(w http.ResponseWriter, r *http.Request) {
 	imdbID := r.URL.Query().Get("imdb_id")
 	if imdbID == "" {
@@ -33,12 +33,12 @@ func (h *SubtitleHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	languages := r.URL.Query().Get("languages")
 
-	// Check DB first
+	var subtitles []services.Subtitle
+
+	// Check DB for stored subtitles
 	if h.db != nil {
 		stored, err := h.db.GetSubtitlesByIMDB(imdbID, languages)
 		if err == nil && len(stored) > 0 {
-			// Convert stored subtitles to API response format
-			subtitles := make([]services.Subtitle, 0, len(stored))
 			for _, s := range stored {
 				subtitles = append(subtitles, services.Subtitle{
 					ID:              fmt.Sprintf("stored-%d", s.ID),
@@ -49,24 +49,43 @@ func (h *SubtitleHandler) Search(w http.ResponseWriter, r *http.Request) {
 					HearingImpaired: s.HearingImpaired,
 				})
 			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(&services.SubtitleSearchResult{
-				Subtitles:  subtitles,
-				TotalCount: len(subtitles),
-			})
-			return
 		}
 	}
 
-	// Fallback to external API
-	result, err := h.subtitleService.SearchByIMDB(imdbID, languages)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	// Find which requested languages are missing from stored results
+	if languages != "" {
+		haveLangs := make(map[string]bool)
+		for _, s := range subtitles {
+			haveLangs[s.Language] = true
+		}
+		var missingLangs []string
+		for _, lang := range strings.Split(languages, ",") {
+			lang = strings.TrimSpace(lang)
+			if lang != "" && !haveLangs[lang] {
+				missingLangs = append(missingLangs, lang)
+			}
+		}
+
+		// Search external APIs for missing languages
+		if len(missingLangs) > 0 {
+			extResult, err := h.subtitleService.SearchByIMDB(imdbID, strings.Join(missingLangs, ","))
+			if err == nil {
+				subtitles = append(subtitles, extResult.Subtitles...)
+			}
+		}
+	} else if len(subtitles) == 0 {
+		// No languages specified and nothing stored — search externally
+		extResult, err := h.subtitleService.SearchByIMDB(imdbID, "")
+		if err == nil {
+			subtitles = append(subtitles, extResult.Subtitles...)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	json.NewEncoder(w).Encode(&services.SubtitleSearchResult{
+		Subtitles:  subtitles,
+		TotalCount: len(subtitles),
+	})
 }
 
 // SearchByFilename handles GET /api/v2/subtitles/search_by_filename?filename={name}&languages={langs}
