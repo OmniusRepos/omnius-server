@@ -91,16 +91,26 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 				continue
 			}
 
+			// Detect source from download URL
+			source := "subdl"
+			if strings.Contains(sub.DownloadURL, "opensubtitles.org") {
+				source = "opensubtitles"
+			}
+
 			storedSub := &models.StoredSubtitle{
 				ImdbCode:        imdbCode,
 				Language:        sub.Language,
 				LanguageName:    sub.LanguageName,
 				ReleaseName:     sub.ReleaseName,
 				HearingImpaired: sub.HearingImpaired,
-				Source:          "subdl",
+				Source:          source,
 			}
 			if err := s.db.CreateSubtitle(storedSub); err != nil {
 				log.Printf("[SubtitleSync] Failed to store subtitle: %v", err)
+				continue
+			}
+			if storedSub.ID == 0 {
+				log.Printf("[SubtitleSync] Skipped duplicate: %s %s", lang, sub.ReleaseName)
 				continue
 			}
 
@@ -271,24 +281,14 @@ type SubtitleSearchResult struct {
 	TotalCount int        `json:"total_count"`
 }
 
-// SearchByIMDB searches subtitles by IMDB ID, queries both SubDL and OpenSubtitles
+// SearchByIMDB searches subtitles by IMDB ID, queries OpenSubtitles first, SubDL as fallback
 func (s *SubtitleService) SearchByIMDB(imdbID string, languages string) (*SubtitleSearchResult, error) {
 	imdb := strings.TrimPrefix(imdbID, "tt")
 	log.Printf("[SubtitleService] Searching subtitles for IMDB: %s, languages: %s", imdb, languages)
 
 	var allSubtitles []Subtitle
 
-	// Query SubDL
-	subdlResult, err := s.searchSubDL(imdb, languages)
-	if err != nil {
-		log.Printf("[SubtitleService] SubDL error: %v", err)
-	} else {
-		allSubtitles = append(allSubtitles, subdlResult.Subtitles...)
-		log.Printf("[SubtitleService] SubDL found %d subtitles", len(subdlResult.Subtitles))
-	}
-
-	// Also query OpenSubtitles per language for smaller languages (like Albanian)
-	// that get excluded from the default 100-result cap
+	// Query OpenSubtitles first (better quality matches)
 	if languages != "" {
 		for _, lang := range strings.Split(languages, ",") {
 			lang = strings.TrimSpace(lang)
@@ -315,6 +315,15 @@ func (s *SubtitleService) SearchByIMDB(imdbID string, languages string) (*Subtit
 			allSubtitles = append(allSubtitles, osResult.Subtitles...)
 			log.Printf("[SubtitleService] OpenSubtitles found %d subtitles", len(osResult.Subtitles))
 		}
+	}
+
+	// Query SubDL as fallback (fills gaps for languages OpenSubtitles missed)
+	subdlResult, err := s.searchSubDL(imdb, languages)
+	if err != nil {
+		log.Printf("[SubtitleService] SubDL error: %v", err)
+	} else {
+		allSubtitles = append(allSubtitles, subdlResult.Subtitles...)
+		log.Printf("[SubtitleService] SubDL found %d subtitles", len(subdlResult.Subtitles))
 	}
 
 	if len(allSubtitles) == 0 {
