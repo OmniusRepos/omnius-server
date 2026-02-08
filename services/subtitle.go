@@ -64,39 +64,13 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 	imdb := strings.TrimPrefix(imdbCode, "tt")
 
 	stored := 0
-	storedLangs := make(map[string]int) // track how many per language
+	storedLangs := make(map[string]int)
 
-	// Phase 1: OpenSubtitles — search and download per-language immediately
-	// (download URLs contain vrf tokens that expire quickly)
-	if languages != "" {
-		for _, lang := range strings.Split(languages, ",") {
-			lang = strings.TrimSpace(lang)
-			if lang == "" {
-				continue
-			}
-			osLang := iso2ToOSLang(lang)
-			if osLang == "" {
-				continue
-			}
-			osResult, err := s.searchOpenSubtitlesREST(imdb, osLang)
-			if err != nil {
-				log.Printf("[SubtitleSync] OpenSubtitles search error for %s: %v", lang, err)
-				continue
-			}
-			// Download top 3 immediately while URLs are fresh
-			count := s.syncDownloadSubtitles(imdbCode, lang, osResult.Subtitles, 3-storedLangs[lang])
-			storedLangs[lang] += count
-			stored += count
-			time.Sleep(300 * time.Millisecond)
-		}
-	}
-
-	// Phase 2: SubDL — fill gaps for languages that still need subs
+	// Use SubDL for sync (OpenSubtitles blocks downloads from server IPs)
 	subdlResult, err := s.searchSubDL(imdb, languages)
 	if err != nil {
 		log.Printf("[SubtitleSync] SubDL search error: %v", err)
 	} else {
-		// Group SubDL results by language
 		byLang := make(map[string][]Subtitle)
 		for _, sub := range subdlResult.Subtitles {
 			byLang[sub.Language] = append(byLang[sub.Language], sub)
@@ -414,9 +388,6 @@ func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Read body for debugging
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("[SubtitleService] Download failed HTTP %d, body: %s", resp.StatusCode, string(body[:min(len(body), 200)]))
 		return "", fmt.Errorf("failed to download subtitle: HTTP %d", resp.StatusCode)
 	}
 
