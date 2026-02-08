@@ -468,6 +468,7 @@ func (d *DB) migrate() error {
 		)`,
 		"CREATE INDEX IF NOT EXISTS idx_subtitles_imdb ON subtitles(imdb_code)",
 		"CREATE INDEX IF NOT EXISTS idx_subtitles_imdb_lang ON subtitles(imdb_code, language)",
+		"ALTER TABLE subtitles ADD COLUMN vtt_path TEXT DEFAULT ''",
 	}
 	for _, m := range subtitleMigrations {
 		d.Exec(m)

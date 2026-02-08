@@ -21,11 +21,11 @@ type SyncService struct {
 	running         bool
 }
 
-func NewSyncService(db *database.DB) *SyncService {
+func NewSyncService(db *database.DB, subtitlesDir string) *SyncService {
 	return &SyncService{
 		db:              db,
 		imdb:            NewIMDBService(),
-		subtitleService: NewSubtitleServiceWithDB(db),
+		subtitleService: NewSubtitleServiceWithDB(db, subtitlesDir),
 		providers: []providers.TorrentProvider{
 			providers.NewYTSProvider(),
 			providers.NewEZTVProvider(),

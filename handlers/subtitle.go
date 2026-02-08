@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -108,7 +109,7 @@ func (h *SubtitleHandler) Download(w http.ResponseWriter, r *http.Request) {
 }
 
 // ServeStored handles GET /api/v2/subtitles/stored/{id}
-// Serves VTT content from DB
+// Serves VTT content from disk file (fallback to DB for old rows)
 func (h *SubtitleHandler) ServeStored(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
@@ -123,9 +124,22 @@ func (h *SubtitleHandler) ServeStored(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var vttContent string
+	if sub.VTTPath != "" {
+		data, err := os.ReadFile(sub.VTTPath)
+		if err == nil {
+			vttContent = string(data)
+		} else {
+			// File missing, fallback to DB content
+			vttContent = sub.VTTContent
+		}
+	} else {
+		vttContent = sub.VTTContent
+	}
+
 	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Write([]byte(sub.VTTContent))
+	w.Write([]byte(vttContent))
 }
 
 // SyncSubtitles handles POST /admin/api/subtitles/sync
@@ -186,6 +200,12 @@ func (h *SubtitleHandler) DeleteStored(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Remove file from disk if it exists
+	sub, err := h.db.GetSubtitleByID(uint(id))
+	if err == nil && sub.VTTPath != "" {
+		os.Remove(sub.VTTPath)
+	}
+
 	if err := h.db.DeleteSubtitle(uint(id)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -211,9 +231,17 @@ func (h *SubtitleHandler) PreviewStored(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Read VTT content from file or DB fallback
+	vttContent := sub.VTTContent
+	if sub.VTTPath != "" {
+		if data, err := os.ReadFile(sub.VTTPath); err == nil {
+			vttContent = string(data)
+		}
+	}
+
 	// Extract first 20 lines
-	lines := strings.SplitN(sub.VTTContent, "\n", 21)
-	totalLines := strings.Count(sub.VTTContent, "\n") + 1
+	lines := strings.SplitN(vttContent, "\n", 21)
+	totalLines := strings.Count(vttContent, "\n") + 1
 	preview := strings.Join(lines, "\n")
 	if len(lines) > 20 {
 		preview = strings.Join(lines[:20], "\n")

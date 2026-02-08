@@ -9,5 +9,6 @@ type StoredSubtitle struct {
 	HearingImpaired bool   `json:"hearing_impaired"`
 	Source          string `json:"source"`
 	VTTContent      string `json:"-"`
+	VTTPath         string `json:"-"`
 	CreatedAt       string `json:"created_at,omitempty"`
 }

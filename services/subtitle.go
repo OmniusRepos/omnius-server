@@ -27,9 +27,10 @@ const (
 )
 
 type SubtitleService struct {
-	client   *http.Client
-	subdlKey string
-	db       *database.DB
+	client       *http.Client
+	subdlKey     string
+	db           *database.DB
+	subtitlesDir string
 }
 
 func NewSubtitleService() *SubtitleService {
@@ -43,9 +44,10 @@ func NewSubtitleService() *SubtitleService {
 	}
 }
 
-func NewSubtitleServiceWithDB(db *database.DB) *SubtitleService {
+func NewSubtitleServiceWithDB(db *database.DB, subtitlesDir string) *SubtitleService {
 	s := NewSubtitleService()
 	s.db = db
+	s.subtitlesDir = subtitlesDir
 	return s
 }
 
@@ -95,11 +97,17 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 				ReleaseName:     sub.ReleaseName,
 				HearingImpaired: sub.HearingImpaired,
 				Source:          "subdl",
-				VTTContent:      vtt,
 			}
 			if err := s.db.CreateSubtitle(storedSub); err != nil {
 				log.Printf("[SubtitleSync] Failed to store subtitle: %v", err)
 				continue
+			}
+
+			// Write VTT to disk and update path
+			if vttPath, err := s.writeSubtitleFile(imdbCode, storedSub.ID, vtt); err != nil {
+				log.Printf("[SubtitleSync] Failed to write VTT file: %v", err)
+			} else {
+				s.db.UpdateSubtitlePath(storedSub.ID, vttPath)
 			}
 			stored++
 
@@ -163,17 +171,39 @@ func (s *SubtitleService) ExtractSubtitlesFromTorrent(t *torrent.Torrent, ts *To
 			LanguageName: langName,
 			ReleaseName:  name,
 			Source:       "torrent",
-			VTTContent:   vtt,
 		}
 		if err := s.db.CreateSubtitle(storedSub); err != nil {
 			log.Printf("[SubtitleExtract] Failed to store %s: %v", name, err)
 			continue
+		}
+
+		// Write VTT to disk and update path
+		if vttPath, err := s.writeSubtitleFile(imdbCode, storedSub.ID, vtt); err != nil {
+			log.Printf("[SubtitleExtract] Failed to write VTT file: %v", err)
+		} else {
+			s.db.UpdateSubtitlePath(storedSub.ID, vttPath)
 		}
 		extracted++
 		log.Printf("[SubtitleExtract] Stored subtitle: %s (lang=%s)", name, lang)
 	}
 
 	return extracted
+}
+
+// writeSubtitleFile writes VTT content to data/subtitles/{imdbCode}/{id}.vtt
+func (s *SubtitleService) writeSubtitleFile(imdbCode string, id uint, vtt string) (string, error) {
+	if s.subtitlesDir == "" {
+		return "", fmt.Errorf("subtitles directory not configured")
+	}
+	dir := filepath.Join(s.subtitlesDir, imdbCode)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create subtitle dir: %w", err)
+	}
+	vttPath := filepath.Join(dir, fmt.Sprintf("%d.vtt", id))
+	if err := os.WriteFile(vttPath, []byte(vtt), 0644); err != nil {
+		return "", fmt.Errorf("failed to write VTT file: %w", err)
+	}
+	return vttPath, nil
 }
 
 // detectLanguageFromFilename tries to detect subtitle language from the filename.

@@ -6,3 +6,5 @@ domains:
 build:
     dockerfile: Dockerfile
     context: .
+volumes:
+  - omnius-data:/app/data

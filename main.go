@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -99,6 +100,15 @@ func main() {
 	// Initialize OMDB service
 	omdbService := services.NewOMDBService(cfg.OmdbAPIKey)
 
+	// Create subtitles directory
+	subtitlesDir := "data/subtitles"
+	if err := os.MkdirAll(subtitlesDir, 0755); err != nil {
+		log.Fatalf("Failed to create subtitles directory: %v", err)
+	}
+
+	// Migrate existing subtitle VTT content from DB to disk files
+	migrateSubtitlesToDisk(db, subtitlesDir)
+
 	// Parse templates
 	templates, err := template.ParseFS(templatesFS, "templates/*.html")
 	if err != nil {
@@ -107,7 +117,7 @@ func main() {
 	}
 
 	// Initialize services
-	subtitleService := services.NewSubtitleServiceWithDB(db)
+	subtitleService := services.NewSubtitleServiceWithDB(db, subtitlesDir)
 	imdbService := services.NewIMDBService()
 
 	// Initialize handlers
@@ -143,7 +153,7 @@ func main() {
 	r.Get("/health", streamHandler.Health)
 
 	// Initialize sync service (for syncing movies from external sources)
-	syncService := services.NewSyncService(db)
+	syncService := services.NewSyncService(db, subtitlesDir)
 
 	// Initialize ratings handler
 	ratingsHandler := handlers.NewRatingsHandler(db, syncService)
@@ -556,6 +566,39 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// migrateSubtitlesToDisk moves existing VTT content from DB to disk files.
+func migrateSubtitlesToDisk(db *database.DB, subtitlesDir string) {
+	subs, err := db.GetSubtitlesWithContent()
+	if err != nil {
+		log.Printf("[Migration] Failed to get subtitles for migration: %v", err)
+		return
+	}
+	if len(subs) == 0 {
+		return
+	}
+
+	log.Printf("[Migration] Migrating %d subtitles from DB to disk...", len(subs))
+	migrated := 0
+	for _, sub := range subs {
+		dir := filepath.Join(subtitlesDir, sub.ImdbCode)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("[Migration] Failed to create dir %s: %v", dir, err)
+			continue
+		}
+		vttPath := filepath.Join(dir, fmt.Sprintf("%d.vtt", sub.ID))
+		if err := os.WriteFile(vttPath, []byte(sub.VTTContent), 0644); err != nil {
+			log.Printf("[Migration] Failed to write %s: %v", vttPath, err)
+			continue
+		}
+		if err := db.UpdateSubtitlePath(sub.ID, vttPath); err != nil {
+			log.Printf("[Migration] Failed to update path for ID %d: %v", sub.ID, err)
+			continue
+		}
+		migrated++
+	}
+	log.Printf("[Migration] Migrated %d/%d subtitles to disk", migrated, len(subs))
 }
 
 // serveSPA serves the Svelte SPA from the embedded static/admin directory
