@@ -683,13 +683,9 @@
     </div>
 
     <!-- Subtitles Card -->
-    <div class="card subtitles-card">
-      <div class="subtitles-header">
+    {#if subtitles.length > 0}
+      <div class="card subtitles-card">
         <h3>Subtitles ({subtitles.length})</h3>
-      </div>
-      {#if loadingSubtitles}
-        <p class="text-muted">Loading subtitles...</p>
-      {:else if subtitles.length > 0}
         {#each subtitles as sub}
           <div class="subtitle-row">
             <span class="subtitle-lang badge">{sub.language_name || sub.language}</span>
@@ -700,19 +696,14 @@
             {#if sub.hearing_impaired}
               <span class="subtitle-hi badge badge-hi">HI</span>
             {/if}
-            {#if sub.created_at}
-              <span class="subtitle-date">{new Date(sub.created_at).toLocaleDateString()}</span>
-            {/if}
             <div class="subtitle-actions">
               <button class="btn btn-xs btn-secondary" on:click={() => previewSubtitle(sub.id)}>Preview</button>
               <button class="btn btn-xs btn-danger" on:click={() => handleDeleteSubtitle(sub.id)}>Delete</button>
             </div>
           </div>
         {/each}
-      {:else}
-        <p class="text-muted">No subtitles stored</p>
-      {/if}
-    </div>
+      </div>
+    {/if}
   {/if}
 </div>
 

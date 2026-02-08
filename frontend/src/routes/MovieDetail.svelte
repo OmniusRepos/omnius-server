@@ -21,6 +21,7 @@
   let showPreviewModal = false;
   let subtitlePreview: SubtitlePreview | null = null;
   let loadingPreview = false;
+  let expandedTorrentHash: string | null = null;
 
   // Modal states
   let showEditModal = false;
@@ -785,47 +786,49 @@
       </div>
       {#if movie.torrents && movie.torrents.length > 0}
         {#each movie.torrents as torrent}
-          <div class="torrent-row">
-            <span class="torrent-quality badge badge-{torrent.quality}">{torrent.quality}</span>
-            <span class="torrent-type">{torrent.type}</span>
-            <span class="torrent-size">{torrent.size}</span>
-            <span class="torrent-hash" title={torrent.hash}>{torrent.hash.substring(0, 8)}...</span>
+          <div class="torrent-section">
+            <div class="torrent-row" role="button" tabindex="0" on:click={() => expandedTorrentHash = expandedTorrentHash === torrent.hash ? null : torrent.hash} on:keypress={(e) => e.key === 'Enter' && (expandedTorrentHash = expandedTorrentHash === torrent.hash ? null : torrent.hash)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chevron" class:expanded={expandedTorrentHash === torrent.hash}>
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+              <span class="torrent-quality badge badge-{torrent.quality}">{torrent.quality}</span>
+              <span class="torrent-type">{torrent.type}</span>
+              <span class="torrent-size">{torrent.size}</span>
+              <span class="torrent-hash" title={torrent.hash}>{torrent.hash.substring(0, 8)}...</span>
+              {#if subtitles.length > 0}
+                <span class="subtitle-count-badge" title="{subtitles.length} subtitle(s)">{subtitles.length} sub{subtitles.length !== 1 ? 's' : ''}</span>
+              {/if}
+            </div>
+            {#if expandedTorrentHash === torrent.hash}
+              <div class="torrent-subtitles">
+                {#if loadingSubtitles}
+                  <p class="text-muted sub-loading">Loading subtitles...</p>
+                {:else if subtitles.length > 0}
+                  {#each subtitles as sub}
+                    <div class="subtitle-row">
+                      <span class="subtitle-lang badge">{sub.language_name || sub.language}</span>
+                      <span class="subtitle-release">{sub.release_name || 'Unknown'}</span>
+                      {#if sub.source}
+                        <span class="subtitle-source badge badge-source">{sub.source}</span>
+                      {/if}
+                      {#if sub.hearing_impaired}
+                        <span class="subtitle-hi badge badge-hi">HI</span>
+                      {/if}
+                      <div class="subtitle-actions">
+                        <button class="btn btn-xs btn-secondary" on:click|stopPropagation={() => previewSubtitle(sub.id)}>Preview</button>
+                        <button class="btn btn-xs btn-danger" on:click|stopPropagation={() => handleDeleteSubtitle(sub.id)}>Delete</button>
+                      </div>
+                    </div>
+                  {/each}
+                {:else}
+                  <p class="text-muted sub-empty">No subtitles synced</p>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/each}
       {:else}
         <p class="text-muted">No torrents yet</p>
-      {/if}
-    </div>
-
-    <!-- Subtitles Card -->
-    <div class="card subtitles-card">
-      <div class="subtitles-header">
-        <h3>Subtitles ({subtitles.length})</h3>
-      </div>
-      {#if loadingSubtitles}
-        <p class="text-muted">Loading subtitles...</p>
-      {:else if subtitles.length > 0}
-        {#each subtitles as sub}
-          <div class="subtitle-row">
-            <span class="subtitle-lang badge">{sub.language_name || sub.language}</span>
-            <span class="subtitle-release">{sub.release_name || 'Unknown'}</span>
-            {#if sub.source}
-              <span class="subtitle-source badge badge-source">{sub.source}</span>
-            {/if}
-            {#if sub.hearing_impaired}
-              <span class="subtitle-hi badge badge-hi">HI</span>
-            {/if}
-            {#if sub.created_at}
-              <span class="subtitle-date">{new Date(sub.created_at).toLocaleDateString()}</span>
-            {/if}
-            <div class="subtitle-actions">
-              <button class="btn btn-xs btn-secondary" on:click={() => previewSubtitle(sub.id)}>Preview</button>
-              <button class="btn btn-xs btn-danger" on:click={() => handleDeleteSubtitle(sub.id)}>Delete</button>
-            </div>
-          </div>
-        {/each}
-      {:else}
-        <p class="text-muted">No subtitles stored</p>
       {/if}
     </div>
   {:else}
@@ -1313,13 +1316,15 @@
   .torrent-row {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--border-color);
+    gap: 12px;
+    padding: 12px 4px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.15s;
   }
 
-  .torrent-row:last-child {
-    border-bottom: none;
+  .torrent-row:hover {
+    background: var(--bg-tertiary);
   }
 
   .torrent-quality {
@@ -1948,27 +1953,54 @@
     font-weight: 500;
   }
 
-  /* Subtitles Card */
-  .subtitles-card {
-    margin-bottom: 24px;
+  /* Expandable Torrent Rows */
+  .torrent-section {
+    border-bottom: 1px solid var(--border-color);
   }
 
-  .subtitles-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
+  .torrent-section:last-child {
+    border-bottom: none;
   }
 
-  .subtitles-header h3 {
-    margin: 0;
+  .chevron {
+    transition: transform 0.2s;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .chevron.expanded {
+    transform: rotate(90deg);
+  }
+
+  .subtitle-count-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--accent-blue);
+    border-radius: 10px;
+    margin-left: auto;
+  }
+
+  .torrent-subtitles {
+    padding: 8px 0 12px 30px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    border-radius: 0 0 6px 6px;
+    margin: 0 -4px 4px -4px;
+    padding-left: 34px;
+    padding-right: 12px;
+  }
+
+  .sub-loading, .sub-empty {
+    padding: 8px 0;
+    font-size: 13px;
   }
 
   .subtitle-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 0;
+    gap: 10px;
+    padding: 8px 0;
     border-bottom: 1px solid var(--border-color);
   }
 
@@ -1980,8 +2012,8 @@
     min-width: 40px;
     text-align: center;
     font-weight: 600;
-    font-size: 12px;
-    padding: 4px 8px;
+    font-size: 11px;
+    padding: 3px 6px;
     background: var(--accent-blue);
     color: white;
     border-radius: 4px;
@@ -1989,7 +2021,7 @@
 
   .subtitle-release {
     flex: 1;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
@@ -1997,9 +2029,9 @@
   }
 
   .badge-source {
-    font-size: 11px;
+    font-size: 10px;
     padding: 2px 6px;
-    background: var(--bg-tertiary);
+    background: var(--bg-secondary);
     color: var(--text-muted);
     border-radius: 4px;
   }
@@ -2012,15 +2044,10 @@
     border-radius: 4px;
   }
 
-  .subtitle-date {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
   .subtitle-actions {
     display: flex;
     gap: 6px;
-    margin-left: auto;
+    flex-shrink: 0;
   }
 
   .btn-xs {
