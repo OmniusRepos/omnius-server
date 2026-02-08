@@ -56,13 +56,6 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 		return 0, fmt.Errorf("no database configured")
 	}
 
-	// Check if already synced
-	count, _ := s.db.CountSubtitlesByIMDB(imdbCode)
-	if count > 0 {
-		log.Printf("[SubtitleSync] Already have %d subtitles for %s, skipping", count, imdbCode)
-		return count, nil
-	}
-
 	log.Printf("[SubtitleSync] Syncing subtitles for %s (languages: %s)", imdbCode, languages)
 
 	result, err := s.SearchByIMDB(imdbCode, languages)

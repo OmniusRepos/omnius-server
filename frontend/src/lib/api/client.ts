@@ -509,7 +509,7 @@ export async function deleteSubtitle(id: number) {
   return request<{ status: string }>(`${API_BASE}/subtitles/${id}`, { method: 'DELETE' });
 }
 
-export async function syncSubtitles(imdbCode: string, languages = 'en') {
+export async function syncSubtitles(imdbCode: string, languages = 'en,sq,es,fr,de,it,pt,tr,ar,zh,ja,ko,ru') {
   return request<{ status: string; stored: number; message: string }>(`${API_BASE}/subtitles/sync`, {
     method: 'POST',
     body: JSON.stringify({ imdb_code: imdbCode, languages }),
