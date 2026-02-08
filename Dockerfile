@@ -1,6 +1,6 @@
 FROM golang:1.22-alpine AS builder
 WORKDIR /app
-# Cache buster: 20260207
+# Cache buster: 20260207b
 COPY go.* ./
 RUN go mod download
 COPY . .
