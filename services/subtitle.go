@@ -25,6 +25,7 @@ import (
 const (
 	subdlAPIURL          = "https://api.subdl.com/api/v1/subtitles"
 	opensubtitlesRestURL = "https://rest.opensubtitles.org/search"
+	opensubtitlesUA      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
 type SubtitleService struct {
@@ -370,7 +371,12 @@ func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "OmniusServer v1.0")
+	// OpenSubtitles download links require a browser-like User-Agent
+	if strings.Contains(downloadURL, "opensubtitles.org") {
+		req.Header.Set("User-Agent", opensubtitlesUA)
+	} else {
+		req.Header.Set("User-Agent", "OmniusServer v1.0")
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -480,7 +486,7 @@ func (s *SubtitleService) searchOpenSubtitlesREST(imdbID string, osLang string) 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "OmniusServer v1.0")
+	req.Header.Set("User-Agent", opensubtitlesUA)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
