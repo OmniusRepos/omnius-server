@@ -486,6 +486,8 @@ export interface StoredSubtitle {
   release_name: string;
   hearing_impaired: boolean;
   source: string;
+  season_number?: number;
+  episode_number?: number;
   created_at?: string;
 }
 
@@ -509,10 +511,15 @@ export async function deleteSubtitle(id: number) {
   return request<{ status: string }>(`${API_BASE}/subtitles/${id}`, { method: 'DELETE' });
 }
 
-export async function syncSubtitles(imdbCode: string, languages = 'en,sq,es,fr,de,it,pt,tr,ar,zh,ja,ko,ru') {
+export async function syncSubtitles(imdbCode: string, languages = 'en,sq,es,fr,de,it,pt,tr,ar,zh,ja,ko,ru', season?: number, episode?: number) {
+  const body: Record<string, unknown> = { imdb_code: imdbCode, languages };
+  if (season && episode) {
+    body.season = season;
+    body.episode = episode;
+  }
   return request<{ status: string; stored: number; message: string }>(`${API_BASE}/subtitles/sync`, {
     method: 'POST',
-    body: JSON.stringify({ imdb_code: imdbCode, languages }),
+    body: JSON.stringify(body),
   });
 }
 

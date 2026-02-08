@@ -9,8 +9,21 @@ import (
 )
 
 func (d *DB) GetSubtitlesByIMDB(imdbCode, language string) ([]models.StoredSubtitle, error) {
-	query := "SELECT id, imdb_code, language, language_name, release_name, hearing_impaired, source, created_at FROM subtitles WHERE imdb_code = ?"
+	return d.GetSubtitlesByIMDBEpisode(imdbCode, language, 0, 0)
+}
+
+func (d *DB) GetSubtitlesByIMDBEpisode(imdbCode, language string, season, episode int) ([]models.StoredSubtitle, error) {
+	query := "SELECT id, imdb_code, language, language_name, release_name, hearing_impaired, source, season_number, episode_number, created_at FROM subtitles WHERE imdb_code = ?"
 	args := []interface{}{imdbCode}
+
+	if season > 0 {
+		query += " AND season_number = ?"
+		args = append(args, season)
+	}
+	if episode > 0 {
+		query += " AND episode_number = ?"
+		args = append(args, episode)
+	}
 
 	if language != "" {
 		langs := strings.Split(language, ",")
@@ -22,7 +35,7 @@ func (d *DB) GetSubtitlesByIMDB(imdbCode, language string) ([]models.StoredSubti
 		query += " AND language IN (" + strings.Join(placeholders, ",") + ")"
 	}
 
-	query += " ORDER BY created_at DESC"
+	query += " ORDER BY season_number, episode_number, created_at DESC"
 
 	rows, err := d.Query(query, args...)
 	if err != nil {
@@ -34,7 +47,7 @@ func (d *DB) GetSubtitlesByIMDB(imdbCode, language string) ([]models.StoredSubti
 	for rows.Next() {
 		var sub models.StoredSubtitle
 		var hi int
-		if err := rows.Scan(&sub.ID, &sub.ImdbCode, &sub.Language, &sub.LanguageName, &sub.ReleaseName, &hi, &sub.Source, &sub.CreatedAt); err != nil {
+		if err := rows.Scan(&sub.ID, &sub.ImdbCode, &sub.Language, &sub.LanguageName, &sub.ReleaseName, &hi, &sub.Source, &sub.SeasonNumber, &sub.EpisodeNumber, &sub.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan subtitle: %w", err)
 		}
 		sub.HearingImpaired = hi == 1
@@ -70,10 +83,10 @@ func (d *DB) CreateSubtitle(sub *models.StoredSubtitle) error {
 		hi = 1
 	}
 	result, err := d.Exec(
-		`INSERT INTO subtitles (imdb_code, language, language_name, release_name, hearing_impaired, source, vtt_content, vtt_path)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO subtitles (imdb_code, language, language_name, release_name, hearing_impaired, source, vtt_content, vtt_path, season_number, episode_number)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(imdb_code, language, release_name) DO NOTHING`,
-		sub.ImdbCode, sub.Language, sub.LanguageName, sub.ReleaseName, hi, sub.Source, sub.VTTContent, sub.VTTPath,
+		sub.ImdbCode, sub.Language, sub.LanguageName, sub.ReleaseName, hi, sub.Source, sub.VTTContent, sub.VTTPath, sub.SeasonNumber, sub.EpisodeNumber,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create subtitle: %w", err)
@@ -120,5 +133,11 @@ func (d *DB) DeleteSubtitlesByIMDB(imdbCode string) error {
 func (d *DB) CountSubtitlesByIMDB(imdbCode string) (int, error) {
 	var count int
 	err := d.QueryRow("SELECT COUNT(*) FROM subtitles WHERE imdb_code = ?", imdbCode).Scan(&count)
+	return count, err
+}
+
+func (d *DB) CountSubtitlesByIMDBEpisode(imdbCode string, season, episode int) (int, error) {
+	var count int
+	err := d.QueryRow("SELECT COUNT(*) FROM subtitles WHERE imdb_code = ? AND season_number = ? AND episode_number = ?", imdbCode, season, episode).Scan(&count)
 	return count, err
 }

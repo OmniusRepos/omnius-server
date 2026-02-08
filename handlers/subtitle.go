@@ -23,7 +23,7 @@ func NewSubtitleHandler(ss *services.SubtitleService, db *database.DB) *Subtitle
 	return &SubtitleHandler{subtitleService: ss, db: db}
 }
 
-// Search handles GET /api/v2/subtitles/search?imdb_id={id}&languages={langs}
+// Search handles GET /api/v2/subtitles/search?imdb_id={id}&languages={langs}&season={s}&episode={e}
 // Returns stored subs from DB, supplements with external API for missing languages
 func (h *SubtitleHandler) Search(w http.ResponseWriter, r *http.Request) {
 	imdbID := r.URL.Query().Get("imdb_id")
@@ -32,12 +32,14 @@ func (h *SubtitleHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	languages := r.URL.Query().Get("languages")
+	season, _ := strconv.Atoi(r.URL.Query().Get("season"))
+	episode, _ := strconv.Atoi(r.URL.Query().Get("episode"))
 
 	var subtitles []services.Subtitle
 
 	// Check DB for stored subtitles
 	if h.db != nil {
-		stored, err := h.db.GetSubtitlesByIMDB(imdbID, languages)
+		stored, err := h.db.GetSubtitlesByIMDBEpisode(imdbID, languages, season, episode)
 		if err == nil && len(stored) > 0 {
 			for _, s := range stored {
 				subtitles = append(subtitles, services.Subtitle{
@@ -68,14 +70,27 @@ func (h *SubtitleHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 		// Search external APIs for missing languages
 		if len(missingLangs) > 0 {
-			extResult, err := h.subtitleService.SearchByIMDB(imdbID, strings.Join(missingLangs, ","))
+			missingStr := strings.Join(missingLangs, ",")
+			var extResult *services.SubtitleSearchResult
+			var err error
+			if season > 0 && episode > 0 {
+				extResult, err = h.subtitleService.SearchByIMDBEpisode(imdbID, missingStr, season, episode)
+			} else {
+				extResult, err = h.subtitleService.SearchByIMDB(imdbID, missingStr)
+			}
 			if err == nil {
 				subtitles = append(subtitles, extResult.Subtitles...)
 			}
 		}
 	} else if len(subtitles) == 0 {
 		// No languages specified and nothing stored — search externally
-		extResult, err := h.subtitleService.SearchByIMDB(imdbID, "")
+		var extResult *services.SubtitleSearchResult
+		var err error
+		if season > 0 && episode > 0 {
+			extResult, err = h.subtitleService.SearchByIMDBEpisode(imdbID, "", season, episode)
+		} else {
+			extResult, err = h.subtitleService.SearchByIMDB(imdbID, "")
+		}
 		if err == nil {
 			subtitles = append(subtitles, extResult.Subtitles...)
 		}
@@ -162,10 +177,13 @@ func (h *SubtitleHandler) ServeStored(w http.ResponseWriter, r *http.Request) {
 }
 
 // SyncSubtitles handles POST /admin/api/subtitles/sync
+// Supports both movie (imdb_code) and episode (imdb_code + season + episode)
 func (h *SubtitleHandler) SyncSubtitles(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ImdbCode  string `json:"imdb_code"`
 		Languages string `json:"languages"`
+		Season    int    `json:"season"`
+		Episode   int    `json:"episode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -176,10 +194,16 @@ func (h *SubtitleHandler) SyncSubtitles(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if req.Languages == "" {
-		req.Languages = "en"
+		req.Languages = "en,sq,es,fr,de,it,pt,tr,ar"
 	}
 
-	count, err := h.subtitleService.SyncSubtitles(req.ImdbCode, req.Languages)
+	var count int
+	var err error
+	if req.Season > 0 && req.Episode > 0 {
+		count, err = h.subtitleService.SyncEpisodeSubtitles(req.ImdbCode, req.Languages, req.Season, req.Episode)
+	} else {
+		count, err = h.subtitleService.SyncSubtitles(req.ImdbCode, req.Languages)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

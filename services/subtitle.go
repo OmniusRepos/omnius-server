@@ -52,6 +52,125 @@ func NewSubtitleServiceWithDB(db *database.DB, subtitlesDir string) *SubtitleSer
 	return s
 }
 
+// SyncEpisodeSubtitles downloads and stores subtitles for a specific episode.
+func (s *SubtitleService) SyncEpisodeSubtitles(imdbCode string, languages string, season, episode int) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("no database configured")
+	}
+
+	log.Printf("[SubtitleSync] Syncing subtitles for %s S%02dE%02d (languages: %s)", imdbCode, season, episode, languages)
+	imdb := strings.TrimPrefix(imdbCode, "tt")
+
+	stored := 0
+	storedLangs := make(map[string]int)
+
+	for _, lang := range strings.Split(languages, ",") {
+		lang = strings.TrimSpace(lang)
+		if lang == "" || storedLangs[lang] >= 2 {
+			continue
+		}
+		subdlResult, err := s.searchSubDLEpisode(imdb, lang, season, episode)
+		if err != nil {
+			log.Printf("[SubtitleSync] SubDL error for %s S%02dE%02d %s: %v", imdbCode, season, episode, lang, err)
+			continue
+		}
+		if len(subdlResult.Subtitles) == 0 {
+			continue
+		}
+		count := s.syncDownloadEpisodeSubtitles(imdbCode, lang, subdlResult.Subtitles, 2-storedLangs[lang], season, episode)
+		storedLangs[lang] += count
+		stored += count
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	log.Printf("[SubtitleSync] Stored %d subtitles for %s S%02dE%02d", stored, imdbCode, season, episode)
+	return stored, nil
+}
+
+// syncDownloadEpisodeSubtitles downloads and stores episode subtitles.
+func (s *SubtitleService) syncDownloadEpisodeSubtitles(imdbCode, lang string, subs []Subtitle, limit, season, episode int) int {
+	if limit <= 0 {
+		return 0
+	}
+	stored := 0
+	for i, sub := range subs {
+		if i >= limit {
+			break
+		}
+		vtt, err := s.DownloadSubtitle(sub.DownloadURL)
+		if err != nil {
+			log.Printf("[SubtitleSync] Failed to download %s subtitle for %s S%02dE%02d: %v", lang, imdbCode, season, episode, err)
+			continue
+		}
+
+		source := "subdl"
+		if strings.Contains(sub.DownloadURL, "opensubtitles.org") {
+			source = "opensubtitles"
+		}
+
+		storedSub := &models.StoredSubtitle{
+			ImdbCode:        imdbCode,
+			Language:        sub.Language,
+			LanguageName:    sub.LanguageName,
+			ReleaseName:     sub.ReleaseName,
+			HearingImpaired: sub.HearingImpaired,
+			Source:          source,
+			SeasonNumber:    season,
+			EpisodeNumber:   episode,
+		}
+		if err := s.db.CreateSubtitle(storedSub); err != nil {
+			continue
+		}
+		if storedSub.ID == 0 {
+			continue
+		}
+
+		if vttPath, err := s.writeSubtitleFile(imdbCode, storedSub.ID, vtt); err != nil {
+			log.Printf("[SubtitleSync] Failed to write VTT file: %v", err)
+		} else {
+			s.db.UpdateSubtitlePath(storedSub.ID, vttPath)
+		}
+		stored++
+		time.Sleep(500 * time.Millisecond)
+	}
+	return stored
+}
+
+// SearchByIMDBEpisode searches subtitles for a specific episode.
+func (s *SubtitleService) SearchByIMDBEpisode(imdbID string, languages string, season, episode int) (*SubtitleSearchResult, error) {
+	imdb := strings.TrimPrefix(imdbID, "tt")
+	log.Printf("[SubtitleService] Searching subtitles for IMDB: %s S%02dE%02d, languages: %s", imdb, season, episode, languages)
+
+	var allSubtitles []Subtitle
+
+	// OpenSubtitles with season/episode
+	if languages != "" {
+		for _, lang := range strings.Split(languages, ",") {
+			lang = strings.TrimSpace(lang)
+			osLang := iso2ToOSLang(lang)
+			if osLang == "" {
+				continue
+			}
+			osResult, err := s.searchOpenSubtitlesRESTEpisode(imdb, osLang, season, episode)
+			if err == nil {
+				allSubtitles = append(allSubtitles, osResult.Subtitles...)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+
+	// SubDL with season/episode
+	subdlResult, err := s.searchSubDLEpisode(imdb, languages, season, episode)
+	if err == nil {
+		allSubtitles = append(allSubtitles, subdlResult.Subtitles...)
+	}
+
+	if len(allSubtitles) == 0 {
+		return &SubtitleSearchResult{Subtitles: []Subtitle{}, TotalCount: 0}, nil
+	}
+	return &SubtitleSearchResult{Subtitles: allSubtitles, TotalCount: len(allSubtitles)}, nil
+}
+
 // SyncSubtitles downloads and stores subtitles for a given IMDB code.
 // Downloads immediately after each search to avoid URL token expiration.
 func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int, error) {
@@ -430,6 +549,31 @@ func (s *SubtitleService) downloadWithHTTP(downloadURL string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+func (s *SubtitleService) searchSubDLEpisode(imdbID string, languages string, season, episode int) (*SubtitleSearchResult, error) {
+	apiURL := fmt.Sprintf("%s?api_key=%s&imdb_id=tt%s&season_number=%d&episode_number=%d", subdlAPIURL, s.subdlKey, imdbID, season, episode)
+	if languages != "" {
+		apiURL += "&languages=" + url.QueryEscape(strings.ToUpper(languages))
+	}
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "OmniusServer v1.0")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch subtitles: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("SubDL API error: %d", resp.StatusCode)
+	}
+
+	return s.parseSubDLResponse(resp.Body)
+}
+
 func (s *SubtitleService) searchSubDL(imdbID string, languages string) (*SubtitleSearchResult, error) {
 	apiURL := fmt.Sprintf("%s?api_key=%s&imdb_id=tt%s", subdlAPIURL, s.subdlKey, imdbID)
 	if languages != "" {
@@ -488,11 +632,23 @@ func (s *SubtitleService) parseSubDLResponse(body io.Reader) (*SubtitleSearchRes
 	return &SubtitleSearchResult{Subtitles: subtitles, TotalCount: len(subtitles)}, nil
 }
 
+func (s *SubtitleService) searchOpenSubtitlesRESTEpisode(imdbID string, osLang string, season, episode int) (*SubtitleSearchResult, error) {
+	apiURL := fmt.Sprintf("%s/imdbid-%s/season-%d/episode-%d", opensubtitlesRestURL, imdbID, season, episode)
+	if osLang != "" {
+		apiURL += "/sublanguageid-" + osLang
+	}
+	return s.doOpenSubtitlesSearch(apiURL)
+}
+
 func (s *SubtitleService) searchOpenSubtitlesREST(imdbID string, osLang string) (*SubtitleSearchResult, error) {
 	apiURL := fmt.Sprintf("%s/imdbid-%s", opensubtitlesRestURL, imdbID)
 	if osLang != "" {
 		apiURL += "/sublanguageid-" + osLang
 	}
+	return s.doOpenSubtitlesSearch(apiURL)
+}
+
+func (s *SubtitleService) doOpenSubtitlesSearch(apiURL string) (*SubtitleSearchResult, error) {
 	log.Printf("[SubtitleService] Fetching: %s", apiURL)
 
 	req, err := http.NewRequest("GET", apiURL, nil)

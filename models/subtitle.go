@@ -8,6 +8,8 @@ type StoredSubtitle struct {
 	ReleaseName     string `json:"release_name"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	Source          string `json:"source"`
+	SeasonNumber    int    `json:"season_number,omitempty"`
+	EpisodeNumber   int    `json:"episode_number,omitempty"`
 	VTTContent      string `json:"-"`
 	VTTPath         string `json:"-"`
 	CreatedAt       string `json:"created_at,omitempty"`

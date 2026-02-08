@@ -22,6 +22,7 @@
   let subtitlePreview: SubtitlePreview | null = null;
   let loadingPreview = false;
   let syncingSubtitles = false;
+  let syncingEpisode = '';  // "S01E02" while syncing
 
   // Modal states
   let showEditModal = false;
@@ -167,16 +168,37 @@
     }
   }
 
+  async function handleSyncEpisodeSubtitles(season: number, episode: number) {
+    if (!series?.imdb_code) return;
+    const key = `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+    syncingEpisode = key;
+    try {
+      await syncSubtitles(series.imdb_code, undefined, season, episode);
+      await loadSubtitles();
+    } catch (err) {
+      console.error(`Failed to sync subtitles for ${key}:`, err);
+    } finally {
+      syncingEpisode = '';
+    }
+  }
+
   async function handleSyncSubtitles() {
     if (!series?.imdb_code) return;
     syncingSubtitles = true;
     try {
-      await syncSubtitles(series.imdb_code);
+      // Sync all episodes across all seasons
+      for (const [season, episodes] of episodesBySeason) {
+        for (const ep of episodes) {
+          syncingEpisode = `S${String(season).padStart(2, '0')}E${String(ep.episode_number).padStart(2, '0')}`;
+          await syncSubtitles(series.imdb_code, undefined, season, ep.episode_number);
+        }
+      }
       await loadSubtitles();
     } catch (err) {
       console.error('Failed to sync subtitles:', err);
     } finally {
       syncingSubtitles = false;
+      syncingEpisode = '';
     }
   }
 
@@ -625,6 +647,14 @@
                             <span class="torrent-badge badge-{torrent.quality}">{torrent.quality}</span>
                           {/each}
                         {/if}
+                        {#if subtitles.filter(s => s.season_number === season && s.episode_number === episode.episode_number).length > 0}
+                          <span class="badge badge-source" style="font-size: 10px;" title="{subtitles.filter(s => s.season_number === season && s.episode_number === episode.episode_number).length} subtitle(s)">{subtitles.filter(s => s.season_number === season && s.episode_number === episode.episode_number).length} CC</span>
+                        {/if}
+                        <button class="btn btn-xs btn-add-torrent"
+                          on:click|stopPropagation={() => handleSyncEpisodeSubtitles(season, episode.episode_number)}
+                          disabled={syncingEpisode === `S${String(season).padStart(2, '0')}E${String(episode.episode_number).padStart(2, '0')}`}
+                          title="Sync subtitles for this episode"
+                        >CC</button>
                         <button class="btn btn-xs btn-add-torrent" on:click={() => openTorrentModal(episode)} title="Add torrent">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="12" y1="5" x2="12" y2="19"/>
@@ -700,25 +730,46 @@
     <div class="card subtitles-card">
       <div class="subtitles-header">
         <h3>Subtitles ({subtitles.length})</h3>
-        <button class="btn btn-sm btn-secondary" on:click={handleSyncSubtitles} disabled={syncingSubtitles || !series.imdb_code}>
-          {syncingSubtitles ? 'SYNCING...' : 'SYNC SUBS'}
-        </button>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          {#if syncingEpisode}
+            <span class="text-muted" style="font-size: 12px;">{syncingEpisode}...</span>
+          {/if}
+          <button class="btn btn-sm btn-secondary" on:click={handleSyncSubtitles} disabled={syncingSubtitles || !series.imdb_code}>
+            {syncingSubtitles ? 'SYNCING ALL...' : 'SYNC ALL'}
+          </button>
+        </div>
       </div>
       {#if subtitles.length > 0}
-        {#each subtitles as sub}
-          <div class="subtitle-row">
-            <span class="subtitle-lang badge">{sub.language_name || sub.language}</span>
-            <span class="subtitle-release">{sub.release_name || 'Unknown'}</span>
-            {#if sub.source}
-              <span class="subtitle-source badge badge-source">{sub.source}</span>
-            {/if}
-            {#if sub.hearing_impaired}
-              <span class="subtitle-hi badge badge-hi">HI</span>
-            {/if}
-            <div class="subtitle-actions">
-              <button class="btn btn-xs btn-secondary" on:click={() => previewSubtitle(sub.id)}>Preview</button>
-              <button class="btn btn-xs btn-danger" on:click={() => handleDeleteSubtitle(sub.id)}>Delete</button>
+        {@const grouped = subtitles.reduce((acc, sub) => {
+          const key = sub.season_number && sub.episode_number
+            ? `S${String(sub.season_number).padStart(2, '0')}E${String(sub.episode_number).padStart(2, '0')}`
+            : 'General';
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(sub);
+          return acc;
+        }, {} as Record<string, StoredSubtitle[]>)}
+        {#each Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)) as [epKey, epSubs]}
+          <div class="episode-subtitle-group">
+            <div class="episode-subtitle-header">
+              <strong>{epKey}</strong>
+              <span class="text-muted" style="font-size: 11px;">{epSubs.length} sub{epSubs.length !== 1 ? 's' : ''}</span>
             </div>
+            {#each epSubs as sub}
+              <div class="subtitle-row">
+                <span class="subtitle-lang badge">{sub.language_name || sub.language}</span>
+                <span class="subtitle-release">{sub.release_name || 'Unknown'}</span>
+                {#if sub.source}
+                  <span class="subtitle-source badge badge-source">{sub.source}</span>
+                {/if}
+                {#if sub.hearing_impaired}
+                  <span class="subtitle-hi badge badge-hi">HI</span>
+                {/if}
+                <div class="subtitle-actions">
+                  <button class="btn btn-xs btn-secondary" on:click={() => previewSubtitle(sub.id)}>Preview</button>
+                  <button class="btn btn-xs btn-danger" on:click={() => handleDeleteSubtitle(sub.id)}>Delete</button>
+                </div>
+              </div>
+            {/each}
           </div>
         {/each}
       {:else}
@@ -1545,12 +1596,28 @@
     margin: 0 !important;
   }
 
+  .episode-subtitle-group {
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+  }
+  .episode-subtitle-group:last-child {
+    border-bottom: none;
+  }
+  .episode-subtitle-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0 2px;
+    font-size: 13px;
+  }
+
   .subtitle-row {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 0;
-    border-bottom: 1px solid var(--border-color);
+    padding: 6px 0 6px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
   }
 
   .subtitle-row:last-child {

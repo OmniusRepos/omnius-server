@@ -393,8 +393,8 @@ func (s *SyncService) RefreshSeries(series *models.Series) (*models.Series, erro
 	// Sync torrents from EZTV
 	s.syncSeriesEpisodeTorrents(series)
 
-	// Sync subtitles in background
-	go s.syncSubtitles(series.ImdbCode)
+	// Sync subtitles per-episode in background
+	go s.syncSeriesSubtitles(series)
 
 	return series, nil
 }
@@ -567,6 +567,34 @@ func (s *SyncService) StartBackgroundSync(interval time.Duration) {
 			s.syncAll()
 		}
 	}()
+}
+
+func (s *SyncService) syncSeriesSubtitles(series *models.Series) {
+	if s.subtitleService == nil || series.ImdbCode == "" {
+		return
+	}
+	languages := "en,sq,es,fr,de,it,pt,tr,ar"
+
+	for seasonNum := 1; seasonNum <= int(series.TotalSeasons); seasonNum++ {
+		episodes, err := s.db.GetEpisodes(series.ID, seasonNum)
+		if err != nil {
+			continue
+		}
+		for _, ep := range episodes {
+			// Skip if already synced
+			count, _ := s.db.CountSubtitlesByIMDBEpisode(series.ImdbCode, int(ep.SeasonNumber), int(ep.EpisodeNumber))
+			if count > 0 {
+				continue
+			}
+			n, err := s.subtitleService.SyncEpisodeSubtitles(series.ImdbCode, languages, int(ep.SeasonNumber), int(ep.EpisodeNumber))
+			if err != nil {
+				log.Printf("[SyncService] Failed to sync subtitles for %s S%02dE%02d: %v", series.ImdbCode, ep.SeasonNumber, ep.EpisodeNumber, err)
+			} else if n > 0 {
+				log.Printf("[SyncService] Synced %d subtitles for %s S%02dE%02d", n, series.ImdbCode, ep.SeasonNumber, ep.EpisodeNumber)
+			}
+			time.Sleep(1 * time.Second) // Rate limit
+		}
+	}
 }
 
 func (s *SyncService) syncSubtitles(imdbCode string) {
