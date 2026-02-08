@@ -416,12 +416,20 @@ func (s *SyncService) syncSeriesEpisodeTorrents(series *models.Series) {
 	seasonPackCount := 0
 	episodeTorrentCount := 0
 
+	// Group episode torrents by S##E##-quality, keep only best (most seeds) per quality
+	type epKey struct {
+		Season  int
+		Episode int
+		Quality string
+	}
+	bestPerQuality := make(map[epKey]providers.EZTVSeriesResult)
+
 	for _, result := range results {
 		if result.Season == 0 {
-			continue // Skip if we can't determine season
+			continue
 		}
 
-		// If episode == 0, this is a season pack
+		// Season packs go straight through
 		if result.Episode == 0 {
 			pack := &models.SeasonPack{
 				SeriesID:  series.ID,
@@ -440,7 +448,26 @@ func (s *SyncService) syncSeriesEpisodeTorrents(series *models.Series) {
 			continue
 		}
 
-		// Individual episode torrent
+		// Normalize quality - only keep 720p, 1080p, 2160p tiers
+		q := result.Quality
+		switch q {
+		case "720p", "1080p", "2160p":
+			// valid
+		case "480p", "":
+			q = "480p"
+		default:
+			q = "480p"
+		}
+		result.Quality = q
+
+		key := epKey{Season: result.Season, Episode: result.Episode, Quality: q}
+		if existing, ok := bestPerQuality[key]; !ok || result.Seeds > existing.Seeds {
+			bestPerQuality[key] = result
+		}
+	}
+
+	// Now save only the best torrent per episode per quality
+	for _, result := range bestPerQuality {
 		// Get or create episode
 		episodes, _ := s.db.GetEpisodes(series.ID, result.Season)
 		var episode *models.Episode
@@ -452,7 +479,6 @@ func (s *SyncService) syncSeriesEpisodeTorrents(series *models.Series) {
 		}
 
 		if episode == nil {
-			// Create episode if not exists
 			episode = &models.Episode{
 				SeriesID:      series.ID,
 				SeasonNumber:  uint(result.Season),
@@ -464,7 +490,6 @@ func (s *SyncService) syncSeriesEpisodeTorrents(series *models.Series) {
 			}
 		}
 
-		// Create torrent
 		torrent := &models.EpisodeTorrent{
 			EpisodeID:     episode.ID,
 			SeriesID:      series.ID,
@@ -483,7 +508,7 @@ func (s *SyncService) syncSeriesEpisodeTorrents(series *models.Series) {
 		}
 	}
 
-	log.Printf("Saved %d season packs and %d episode torrents for %s", seasonPackCount, episodeTorrentCount, series.Title)
+	log.Printf("Saved %d season packs and %d episode torrents for %s (deduped from %d)", seasonPackCount, episodeTorrentCount, series.Title, len(results))
 }
 
 // SyncEpisode fetches torrents for a specific episode

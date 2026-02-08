@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/storage"
@@ -91,9 +92,9 @@ func (s *TorrentService) AddTorrentFile(data []byte) (*torrent.Torrent, error) {
 
 func (s *TorrentService) GetTorrent(infoHash string) (*torrent.Torrent, bool) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	t, ok := s.torrents[infoHash]
+	s.mu.RUnlock()
+
 	if ok {
 		return t, true
 	}
@@ -106,7 +107,7 @@ func (s *TorrentService) GetTorrent(infoHash string) (*torrent.Torrent, bool) {
 	}
 
 	// Wait for info with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*1000000000) // 30 seconds
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	select {
