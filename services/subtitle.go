@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anacrolix/torrent"
 
@@ -163,7 +164,7 @@ func (s *SubtitleService) ExtractSubtitlesFromTorrent(t *torrent.Torrent, ts *To
 		// Detect language from filename (e.g., "Movie.eng.srt", "Movie.English.srt")
 		lang, langName := detectLanguageFromFilename(name)
 
-		vtt := convertToVTT(string(data))
+		vtt := convertToVTT(toUTF8(string(data)))
 
 		storedSub := &models.StoredSubtitle{
 			ImdbCode:     imdbCode,
@@ -397,6 +398,9 @@ func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 		content = string(data)
 	}
 
+	// Ensure UTF-8 encoding
+	content = toUTF8(content)
+
 	// Convert to VTT
 	vtt := convertToVTT(content)
 	log.Printf("[SubtitleService] Converted to VTT (%d chars)", len(vtt))
@@ -510,6 +514,52 @@ func (s *SubtitleService) searchOpenSubtitlesREST(imdbID string, osLang string) 
 
 	log.Printf("[SubtitleService] Found %d subtitles from OpenSubtitles", len(subtitles))
 	return &SubtitleSearchResult{Subtitles: subtitles, TotalCount: len(subtitles)}, nil
+}
+
+// --- Encoding detection ---
+
+// toUTF8 converts text to UTF-8 if it's not already valid UTF-8.
+// Handles Windows-1252/Latin-1 encoded subtitles (common for European languages).
+func toUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	// Check for UTF-8 BOM and strip it
+	if len(s) >= 3 && s[0] == 0xEF && s[1] == 0xBB && s[2] == 0xBF {
+		s = s[3:]
+		if utf8.ValidString(s) {
+			return s
+		}
+	}
+	// Assume Windows-1252 (superset of Latin-1, most common for European subs)
+	var buf strings.Builder
+	buf.Grow(len(s) * 2)
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b < 0x80 {
+			buf.WriteByte(b)
+		} else {
+			// Windows-1252 bytes 0x80-0xFF map to specific Unicode code points
+			buf.WriteRune(windows1252ToRune(b))
+		}
+	}
+	return buf.String()
+}
+
+// windows1252ToRune converts a Windows-1252 byte (0x80-0xFF) to its Unicode rune.
+func windows1252ToRune(b byte) rune {
+	// 0x80-0x9F range has special mappings in Windows-1252 (differs from Latin-1)
+	if b >= 0xA0 {
+		return rune(b) // Latin-1 supplement: direct mapping
+	}
+	// Windows-1252 special range 0x80-0x9F
+	table := [32]rune{
+		0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, // 80-87
+		0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F, // 88-8F
+		0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, // 90-97
+		0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178, // 98-9F
+	}
+	return table[b-0x80]
 }
 
 // --- Subtitle format conversion ---
