@@ -405,11 +405,7 @@ func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 		return "", err
 	}
 	// OpenSubtitles download links require a browser-like User-Agent
-	if strings.Contains(downloadURL, "opensubtitles.org") {
-		req.Header.Set("User-Agent", opensubtitlesUA)
-	} else {
-		req.Header.Set("User-Agent", "OmniusServer v1.0")
-	}
+	req.Header.Set("User-Agent", "OmniusServer v1.0")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -418,6 +414,9 @@ func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// Read body for debugging
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("[SubtitleService] Download failed HTTP %d, body: %s", resp.StatusCode, string(body[:min(len(body), 200)]))
 		return "", fmt.Errorf("failed to download subtitle: HTTP %d", resp.StatusCode)
 	}
 
