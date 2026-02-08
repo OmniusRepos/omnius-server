@@ -477,6 +477,38 @@ export async function updateServices(services: ServiceConfig[]) {
   });
 }
 
+// Subtitles
+export interface StoredSubtitle {
+  id: number;
+  imdb_code: string;
+  language: string;
+  language_name: string;
+  release_name: string;
+  hearing_impaired: boolean;
+  source: string;
+  created_at?: string;
+}
+
+export interface SubtitlePreview {
+  id: number;
+  preview: string;
+  language: string;
+  release_name: string;
+  total_lines: number;
+}
+
+export async function getSubtitles(imdbCode: string) {
+  return request<{ subtitles: StoredSubtitle[]; count: number }>(`${API_BASE}/subtitles?imdb_code=${encodeURIComponent(imdbCode)}`);
+}
+
+export async function getSubtitlePreview(id: number) {
+  return request<SubtitlePreview>(`${API_BASE}/subtitles/${id}/preview`);
+}
+
+export async function deleteSubtitle(id: number) {
+  return request<{ status: string }>(`${API_BASE}/subtitles/${id}`, { method: 'DELETE' });
+}
+
 // Auth
 export async function logout() {
   window.location.href = '/admin/logout';

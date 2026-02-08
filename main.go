@@ -341,6 +341,7 @@ func main() {
 			r.Post("/api/subtitles/sync", subtitleHandler.SyncSubtitles)
 			r.Get("/api/subtitles", subtitleHandler.ListStored)
 			r.Delete("/api/subtitles/{id}", subtitleHandler.DeleteStored)
+			r.Get("/api/subtitles/{id}/preview", subtitleHandler.PreviewStored)
 
 			// Services config admin API
 			r.Get("/api/services", configHandler.AdminListServices)

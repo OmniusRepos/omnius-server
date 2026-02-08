@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { link, push } from 'svelte-spa-router';
-  import { getSeriesDetails, deleteSeries, updateSeries, type SeriesDetails, type Episode } from '../lib/api/client';
+  import { getSeriesDetails, deleteSeries, updateSeries, getSubtitles, getSubtitlePreview, deleteSubtitle, type SeriesDetails, type Episode, type StoredSubtitle, type SubtitlePreview } from '../lib/api/client';
   import Modal from '../lib/components/Modal.svelte';
 
   export let params: { id: string };
@@ -14,6 +14,13 @@
   // Grouped episodes by season
   let episodesBySeason: Map<number, Episode[]> = new Map();
   let expandedSeasons: Set<number> = new Set();
+
+  // Subtitles
+  let subtitles: StoredSubtitle[] = [];
+  let loadingSubtitles = false;
+  let showPreviewModal = false;
+  let subtitlePreview: SubtitlePreview | null = null;
+  let loadingPreview = false;
 
   // Modal states
   let showEditModal = false;
@@ -67,6 +74,7 @@
         if (episodesBySeason.size > 0) {
           expandedSeasons.add(Math.min(...episodesBySeason.keys()));
         }
+        loadSubtitles();
       }
     } catch (err) {
       console.error('Failed to load series:', err);
@@ -120,6 +128,41 @@
       console.error('Failed to refresh series:', err);
     } finally {
       refreshing = false;
+    }
+  }
+
+  async function loadSubtitles() {
+    if (!series?.imdb_code) return;
+    loadingSubtitles = true;
+    try {
+      const res = await getSubtitles(series.imdb_code);
+      subtitles = res.subtitles || [];
+    } catch (err) {
+      console.error('Failed to load subtitles:', err);
+    } finally {
+      loadingSubtitles = false;
+    }
+  }
+
+  async function previewSubtitle(id: number) {
+    loadingPreview = true;
+    showPreviewModal = true;
+    subtitlePreview = null;
+    try {
+      subtitlePreview = await getSubtitlePreview(id);
+    } catch (err) {
+      console.error('Failed to load preview:', err);
+    } finally {
+      loadingPreview = false;
+    }
+  }
+
+  async function handleDeleteSubtitle(id: number) {
+    try {
+      await deleteSubtitle(id);
+      subtitles = subtitles.filter(s => s.id !== id);
+    } catch (err) {
+      console.error('Failed to delete subtitle:', err);
     }
   }
 
@@ -638,6 +681,38 @@
         {/if}
       </div>
     </div>
+
+    <!-- Subtitles Card -->
+    <div class="card subtitles-card">
+      <div class="subtitles-header">
+        <h3>Subtitles ({subtitles.length})</h3>
+      </div>
+      {#if loadingSubtitles}
+        <p class="text-muted">Loading subtitles...</p>
+      {:else if subtitles.length > 0}
+        {#each subtitles as sub}
+          <div class="subtitle-row">
+            <span class="subtitle-lang badge">{sub.language_name || sub.language}</span>
+            <span class="subtitle-release">{sub.release_name || 'Unknown'}</span>
+            {#if sub.source}
+              <span class="subtitle-source badge badge-source">{sub.source}</span>
+            {/if}
+            {#if sub.hearing_impaired}
+              <span class="subtitle-hi badge badge-hi">HI</span>
+            {/if}
+            {#if sub.created_at}
+              <span class="subtitle-date">{new Date(sub.created_at).toLocaleDateString()}</span>
+            {/if}
+            <div class="subtitle-actions">
+              <button class="btn btn-xs btn-secondary" on:click={() => previewSubtitle(sub.id)}>Preview</button>
+              <button class="btn btn-xs btn-danger" on:click={() => handleDeleteSubtitle(sub.id)}>Delete</button>
+            </div>
+          </div>
+        {/each}
+      {:else}
+        <p class="text-muted">No subtitles stored</p>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -803,6 +878,25 @@
   <svelte:fragment slot="footer">
     <button class="btn btn-secondary" on:click={() => showSeasonTorrentModal = false}>Cancel</button>
     <button class="btn btn-primary" on:click={handleAddSeasonTorrent}>Add to All Episodes</button>
+  </svelte:fragment>
+</Modal>
+
+<!-- Subtitle Preview Modal -->
+<Modal bind:open={showPreviewModal} title="Subtitle Preview" size="lg" on:close={() => showPreviewModal = false}>
+  {#if loadingPreview}
+    <div class="loading-small">Loading preview...</div>
+  {:else if subtitlePreview}
+    <div class="preview-info">
+      <span class="badge">{subtitlePreview.language}</span>
+      <span class="preview-release">{subtitlePreview.release_name}</span>
+      <span class="text-muted">({subtitlePreview.total_lines} total lines)</span>
+    </div>
+    <pre class="vtt-preview">{subtitlePreview.preview}</pre>
+  {:else}
+    <p class="text-muted">Failed to load preview</p>
+  {/if}
+  <svelte:fragment slot="footer">
+    <button class="btn btn-secondary" on:click={() => showPreviewModal = false}>Close</button>
   </svelte:fragment>
 </Modal>
 
@@ -1421,5 +1515,113 @@
     border-top-color: var(--accent-red);
     border-radius: 50%;
     animation: spin 1s linear infinite;
+  }
+
+  /* Subtitles Card */
+  .subtitles-card {
+    margin-bottom: 24px;
+  }
+
+  .subtitles-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .subtitles-header h3 {
+    margin: 0;
+  }
+
+  .subtitle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .subtitle-row:last-child {
+    border-bottom: none;
+  }
+
+  .subtitle-lang {
+    min-width: 40px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 12px;
+    padding: 4px 8px;
+    background: var(--accent-blue);
+    color: white;
+    border-radius: 4px;
+  }
+
+  .subtitle-release {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .badge-source {
+    font-size: 11px;
+    padding: 2px 6px;
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    border-radius: 4px;
+  }
+
+  .badge-hi {
+    font-size: 10px;
+    padding: 2px 5px;
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+    border-radius: 4px;
+  }
+
+  .subtitle-date {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .subtitle-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  /* Subtitle Preview Modal */
+  .preview-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .preview-release {
+    font-weight: 500;
+    font-size: 14px;
+  }
+
+  .vtt-preview {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-x: auto;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    color: var(--text-secondary);
+  }
+
+  .loading-small {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
   }
 </style>

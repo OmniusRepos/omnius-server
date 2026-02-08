@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -192,6 +193,40 @@ func (h *SubtitleHandler) DeleteStored(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// PreviewStored handles GET /admin/api/subtitles/{id}/preview
+// Returns the first 20 lines of VTT content for preview
+func (h *SubtitleHandler) PreviewStored(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	sub, err := h.db.GetSubtitleByID(uint(id))
+	if err != nil {
+		http.Error(w, "subtitle not found", http.StatusNotFound)
+		return
+	}
+
+	// Extract first 20 lines
+	lines := strings.SplitN(sub.VTTContent, "\n", 21)
+	totalLines := strings.Count(sub.VTTContent, "\n") + 1
+	preview := strings.Join(lines, "\n")
+	if len(lines) > 20 {
+		preview = strings.Join(lines[:20], "\n")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":           sub.ID,
+		"preview":      preview,
+		"language":     sub.Language,
+		"release_name": sub.ReleaseName,
+		"total_lines":  totalLines,
+	})
 }
 
 // Languages handles GET /api/v2/subtitle_languages
