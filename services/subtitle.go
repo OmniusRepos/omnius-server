@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,7 +25,6 @@ import (
 const (
 	subdlAPIURL          = "https://api.subdl.com/api/v1/subtitles"
 	opensubtitlesRestURL = "https://rest.opensubtitles.org/search"
-	opensubtitlesUA      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
 type SubtitleService struct {
@@ -66,33 +64,10 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 
 	stored := 0
 	storedLangs := make(map[string]int)
-	langs := strings.Split(languages, ",")
 
-	// Phase 1: OpenSubtitles (best quality, uses curl to bypass CDN blocks)
-	for _, lang := range langs {
-		lang = strings.TrimSpace(lang)
-		if lang == "" || storedLangs[lang] >= 3 {
-			continue
-		}
-		osLang := iso2ToOSLang(lang)
-		if osLang == "" {
-			continue
-		}
-		osResult, err := s.searchOpenSubtitlesREST(imdb, osLang)
-		if err != nil {
-			log.Printf("[SubtitleSync] OpenSubtitles error for %s: %v", lang, err)
-			continue
-		}
-		if len(osResult.Subtitles) > 0 {
-			count := s.syncDownloadSubtitles(imdbCode, lang, osResult.Subtitles, 3-storedLangs[lang])
-			storedLangs[lang] += count
-			stored += count
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-
-	// Phase 2: SubDL fills gaps (per-language, uppercase codes)
-	for _, lang := range langs {
+	// SubDL for sync downloads (OpenSubtitles blocks server IPs for downloads)
+	// OpenSubtitles still used for live search — app downloads directly via Tauri
+	for _, lang := range strings.Split(languages, ",") {
 		lang = strings.TrimSpace(lang)
 		if lang == "" || storedLangs[lang] >= 3 {
 			continue
@@ -103,6 +78,7 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 			continue
 		}
 		if len(subdlResult.Subtitles) == 0 {
+			log.Printf("[SubtitleSync] No SubDL results for %s", lang)
 			continue
 		}
 		count := s.syncDownloadSubtitles(imdbCode, lang, subdlResult.Subtitles, 3-storedLangs[lang])
@@ -399,15 +375,7 @@ func (s *SubtitleService) SearchByFilename(filename string, languages string) (*
 func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 	log.Printf("[SubtitleService] Downloading subtitle from: %s", downloadURL)
 
-	var data []byte
-	var err error
-
-	// Use curl for OpenSubtitles (their download server blocks Go HTTP client from datacenter IPs)
-	if strings.Contains(downloadURL, "opensubtitles.org") {
-		data, err = downloadWithCurl(downloadURL)
-	} else {
-		data, err = s.downloadWithHTTP(downloadURL)
-	}
+	data, err := s.downloadWithHTTP(downloadURL)
 	if err != nil {
 		return "", err
 	}
@@ -441,17 +409,7 @@ func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 	return vtt, nil
 }
 
-// downloadWithCurl uses curl to download files (bypasses Go HTTP client issues with some CDNs)
-func downloadWithCurl(url string) ([]byte, error) {
-	ctx := exec.Command("curl", "-s", "-L", "-f", "--max-time", "15", url)
-	data, err := ctx.Output()
-	if err != nil {
-		return nil, fmt.Errorf("curl download failed: %w", err)
-	}
-	return data, nil
-}
-
-// downloadWithHTTP uses Go's HTTP client for regular downloads
+// downloadWithHTTP downloads a file using Go's HTTP client
 func (s *SubtitleService) downloadWithHTTP(downloadURL string) ([]byte, error) {
 	req, err := http.NewRequest("GET", downloadURL, nil)
 	if err != nil {
