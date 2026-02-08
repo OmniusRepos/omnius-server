@@ -267,11 +267,13 @@ func (h *StreamHandler) StreamStatus(w http.ResponseWriter, r *http.Request) {
 		progress = float64(downloaded) / float64(totalSize) * 100
 	}
 
+	speed := h.torrentService.GetSpeed(hash, downloaded)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"downloaded":     downloaded,
 		"total_size":     totalSize,
-		"download_speed": stats.ConnStats.BytesReadData.Int64() / 1024, // KB/s approx
+		"download_speed": speed,
 		"peers":          stats.ActivePeers,
 		"progress":       progress,
 	})

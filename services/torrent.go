@@ -15,10 +15,16 @@ import (
 	"github.com/anacrolix/torrent/storage"
 )
 
+type speedSnapshot struct {
+	bytes int64
+	time  time.Time
+}
+
 type TorrentService struct {
 	client      *torrent.Client
 	downloadDir string
 	torrents    map[string]*torrent.Torrent
+	lastSnap    map[string]speedSnapshot
 	mu          sync.RWMutex
 }
 
@@ -41,6 +47,7 @@ func NewTorrentService(downloadDir string) (*TorrentService, error) {
 		client:      client,
 		downloadDir: downloadDir,
 		torrents:    make(map[string]*torrent.Torrent),
+		lastSnap:    make(map[string]speedSnapshot),
 	}, nil
 }
 
@@ -122,6 +129,28 @@ func (s *TorrentService) GetTorrent(infoHash string) (*torrent.Torrent, bool) {
 	}
 }
 
+// GetSpeed returns download speed in bytes/sec for a torrent by comparing snapshots.
+func (s *TorrentService) GetSpeed(infoHash string, currentBytes int64) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	snap, ok := s.lastSnap[infoHash]
+	if !ok || now.Sub(snap.time) < 500*time.Millisecond {
+		s.lastSnap[infoHash] = speedSnapshot{bytes: currentBytes, time: now}
+		return 0
+	}
+
+	elapsed := now.Sub(snap.time).Seconds()
+	delta := currentBytes - snap.bytes
+	s.lastSnap[infoHash] = speedSnapshot{bytes: currentBytes, time: now}
+
+	if delta <= 0 || elapsed <= 0 {
+		return 0
+	}
+	return int64(float64(delta) / elapsed)
+}
+
 func (s *TorrentService) RemoveTorrent(infoHash string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -129,6 +158,7 @@ func (s *TorrentService) RemoveTorrent(infoHash string) {
 	if t, ok := s.torrents[infoHash]; ok {
 		t.Drop()
 		delete(s.torrents, infoHash)
+		delete(s.lastSnap, infoHash)
 	}
 }
 
