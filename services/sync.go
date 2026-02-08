@@ -573,9 +573,17 @@ func (s *SyncService) syncSubtitles(imdbCode string) {
 	if s.subtitleService == nil {
 		return
 	}
-	_, err := s.subtitleService.SyncSubtitles(imdbCode, "en")
+	// Skip if subtitles already synced for this movie
+	count, _ := s.db.CountSubtitlesByIMDB(imdbCode)
+	if count > 0 {
+		return
+	}
+	languages := "en,sq,es,fr,de,it,pt,tr,ar"
+	count, err := s.subtitleService.SyncSubtitles(imdbCode, languages)
 	if err != nil {
 		log.Printf("[SyncService] Failed to sync subtitles for %s: %v", imdbCode, err)
+	} else if count > 0 {
+		log.Printf("[SyncService] Auto-synced %d subtitles for %s", count, imdbCode)
 	}
 }
 
@@ -591,6 +599,10 @@ func (s *SyncService) syncAll() {
 
 	for _, movie := range movies {
 		s.syncMovieTorrents(&movie)
+		// Auto-sync subtitles for movies that don't have any
+		if movie.ImdbCode != "" {
+			s.syncSubtitles(movie.ImdbCode)
+		}
 		time.Sleep(1 * time.Second) // Rate limiting
 	}
 
