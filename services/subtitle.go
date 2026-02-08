@@ -459,10 +459,15 @@ func (s *SubtitleService) parseSubDLResponse(body io.Reader) (*SubtitleSearchRes
 
 	subtitles := make([]Subtitle, 0, len(data.Subtitles))
 	for _, sub := range data.Subtitles {
+		langCode := subdlLangToISO2(strings.ToLower(sub.Language))
+		langName := sub.Lang
+		if langName == "" {
+			langName = sub.Language
+		}
 		subtitles = append(subtitles, Subtitle{
 			ID:              sub.URL,
-			Language:        strings.ToLower(sub.Language),
-			LanguageName:    sub.Lang,
+			Language:        langCode,
+			LanguageName:    langName,
 			DownloadURL:     "https://dl.subdl.com" + sub.URL,
 			ReleaseName:     sub.ReleaseName,
 			Uploader:        sub.Author,
@@ -770,6 +775,34 @@ func iso2ToOSLang(code string) string {
 		return os3
 	}
 	return ""
+}
+
+// subdlLangToISO2 converts SubDL full language names to ISO 639-1 2-letter codes
+func subdlLangToISO2(lang string) string {
+	m := map[string]string{
+		"english": "en", "spanish": "es", "french": "fr", "german": "de",
+		"italian": "it", "portuguese": "pt", "russian": "ru", "chinese": "zh",
+		"japanese": "ja", "korean": "ko", "arabic": "ar", "dutch": "nl",
+		"polish": "pl", "turkish": "tr", "swedish": "sv", "norwegian": "no",
+		"danish": "da", "finnish": "fi", "greek": "el", "hebrew": "he",
+		"hindi": "hi", "thai": "th", "vietnamese": "vi", "indonesian": "id",
+		"czech": "cs", "hungarian": "hu", "romanian": "ro", "bulgarian": "bg",
+		"ukrainian": "uk", "croatian": "hr", "serbian": "sr", "slovak": "sk",
+		"slovenian": "sl", "albanian": "sq", "persian": "fa", "farsi": "fa",
+		"malay": "ms", "estonian": "et", "latvian": "lv", "lithuanian": "lt",
+		"catalan": "ca", "bosnian": "bs", "macedonian": "mk", "icelandic": "is",
+		"georgian": "ka", "armenian": "hy", "bengali": "bn", "urdu": "ur",
+		"tagalog": "tl", "filipino": "tl", "swahili": "sw",
+		"big 5 code": "zh", "brazillian portuguese": "pt",
+	}
+	if code, ok := m[lang]; ok {
+		return code
+	}
+	// If already a 2-letter code, return as-is
+	if len(lang) == 2 {
+		return lang
+	}
+	return lang
 }
 
 // GetSubtitleLanguages returns the static list of supported subtitle languages
