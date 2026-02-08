@@ -256,13 +256,34 @@ func (s *SubtitleService) SearchByIMDB(imdbID string, languages string) (*Subtit
 		log.Printf("[SubtitleService] SubDL found %d subtitles", len(subdlResult.Subtitles))
 	}
 
-	// Also query OpenSubtitles for additional languages/results
-	osResult, err := s.searchOpenSubtitlesREST(imdb)
-	if err != nil {
-		log.Printf("[SubtitleService] OpenSubtitles error: %v", err)
+	// Also query OpenSubtitles per language for smaller languages (like Albanian)
+	// that get excluded from the default 100-result cap
+	if languages != "" {
+		for _, lang := range strings.Split(languages, ",") {
+			lang = strings.TrimSpace(lang)
+			osLang := iso2ToOSLang(lang)
+			if osLang == "" {
+				continue
+			}
+			osResult, err := s.searchOpenSubtitlesREST(imdb, osLang)
+			if err != nil {
+				log.Printf("[SubtitleService] OpenSubtitles error for %s: %v", lang, err)
+				continue
+			}
+			allSubtitles = append(allSubtitles, osResult.Subtitles...)
+			if len(osResult.Subtitles) > 0 {
+				log.Printf("[SubtitleService] OpenSubtitles found %d %s subtitles", len(osResult.Subtitles), lang)
+			}
+			time.Sleep(200 * time.Millisecond) // rate limit
+		}
 	} else {
-		allSubtitles = append(allSubtitles, osResult.Subtitles...)
-		log.Printf("[SubtitleService] OpenSubtitles found %d subtitles", len(osResult.Subtitles))
+		osResult, err := s.searchOpenSubtitlesREST(imdb, "")
+		if err != nil {
+			log.Printf("[SubtitleService] OpenSubtitles error: %v", err)
+		} else {
+			allSubtitles = append(allSubtitles, osResult.Subtitles...)
+			log.Printf("[SubtitleService] OpenSubtitles found %d subtitles", len(osResult.Subtitles))
+		}
 	}
 
 	if len(allSubtitles) == 0 {
@@ -405,8 +426,11 @@ func (s *SubtitleService) parseSubDLResponse(body io.Reader) (*SubtitleSearchRes
 	return &SubtitleSearchResult{Subtitles: subtitles, TotalCount: len(subtitles)}, nil
 }
 
-func (s *SubtitleService) searchOpenSubtitlesREST(imdbID string) (*SubtitleSearchResult, error) {
+func (s *SubtitleService) searchOpenSubtitlesREST(imdbID string, osLang string) (*SubtitleSearchResult, error) {
 	apiURL := fmt.Sprintf("%s/imdbid-%s", opensubtitlesRestURL, imdbID)
+	if osLang != "" {
+		apiURL += "/sublanguageid-" + osLang
+	}
 	log.Printf("[SubtitleService] Fetching: %s", apiURL)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
@@ -632,6 +656,25 @@ func osLangToISO2(code string) string {
 		return iso2
 	}
 	return code
+}
+
+// iso2ToOSLang converts ISO 639-1 2-letter codes to OpenSubtitles 3-letter codes
+func iso2ToOSLang(code string) string {
+	m := map[string]string{
+		"en": "eng", "es": "spa", "fr": "fre", "de": "ger", "it": "ita",
+		"pt": "por", "ru": "rus", "zh": "chi", "ja": "jpn", "ko": "kor",
+		"ar": "ara", "nl": "dut", "pl": "pol", "tr": "tur", "sv": "swe",
+		"no": "nor", "da": "dan", "fi": "fin", "el": "gre", "he": "heb",
+		"hi": "hin", "th": "tha", "vi": "vie", "id": "ind", "cs": "cze",
+		"hu": "hun", "ro": "rum", "bg": "bul", "uk": "ukr", "hr": "hrv",
+		"sr": "srp", "sk": "slo", "sl": "slv", "sq": "alb", "fa": "per",
+		"ms": "may", "et": "est", "lv": "lav", "lt": "lit", "ca": "cat",
+		"bs": "bos", "mk": "mac", "is": "ice", "ka": "geo", "hy": "arm",
+	}
+	if os3, ok := m[code]; ok {
+		return os3
+	}
+	return ""
 }
 
 // GetSubtitleLanguages returns the static list of supported subtitle languages
