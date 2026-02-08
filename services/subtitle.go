@@ -352,7 +352,7 @@ func (s *SubtitleService) SearchByFilename(filename string, languages string) (*
 	encodedFilename := url.QueryEscape(filename)
 	apiURL := fmt.Sprintf("%s?api_key=%s&file_name=%s", subdlAPIURL, s.subdlKey, encodedFilename)
 	if languages != "" {
-		apiURL += "&languages=" + url.QueryEscape(languages)
+		apiURL += "&languages=" + url.QueryEscape(strings.ToUpper(languages))
 	}
 
 	req, err := http.NewRequest("GET", apiURL, nil)
@@ -432,7 +432,7 @@ func (s *SubtitleService) DownloadSubtitle(downloadURL string) (string, error) {
 func (s *SubtitleService) searchSubDL(imdbID string, languages string) (*SubtitleSearchResult, error) {
 	apiURL := fmt.Sprintf("%s?api_key=%s&imdb_id=tt%s", subdlAPIURL, s.subdlKey, imdbID)
 	if languages != "" {
-		apiURL += "&languages=" + url.QueryEscape(languages)
+		apiURL += "&languages=" + url.QueryEscape(strings.ToUpper(languages))
 	}
 
 	req, err := http.NewRequest("GET", apiURL, nil)
