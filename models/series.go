@@ -107,11 +107,3 @@ type SeriesDetailsData struct {
 	Series Series `json:"series"`
 }
 
-// TorrentStats represents real-time torrent statistics
-type TorrentStats struct {
-	Hash  string `json:"hash"`
-	Seeds uint   `json:"seeds"`
-	Peers uint   `json:"peers"`
-	Name  string `json:"name,omitempty"`
-	Found bool   `json:"found"`
-}

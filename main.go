@@ -211,7 +211,6 @@ func main() {
 		r.Post("/sync_series", ratingsHandler.SyncSeries)
 		r.Post("/refresh_movie", ratingsHandler.RefreshMovie)
 		r.Post("/refresh_series", ratingsHandler.RefreshSeries)
-		r.Get("/torrent_stats", ratingsHandler.TorrentStats)
 
 		// Curated Lists
 		r.Get("/curated_lists.json", curatedHandler.ListCuratedLists)
