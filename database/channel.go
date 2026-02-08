@@ -18,7 +18,7 @@ type ChannelFilter struct {
 }
 
 func (d *DB) ListChannels(filter ChannelFilter) ([]models.Channel, int, error) {
-	if filter.Limit <= 0 || filter.Limit > 100 {
+	if filter.Limit <= 0 || filter.Limit > 50000 {
 		filter.Limit = 50
 	}
 	if filter.Page <= 0 {
