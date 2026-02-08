@@ -54,82 +54,115 @@ func NewSubtitleServiceWithDB(db *database.DB, subtitlesDir string) *SubtitleSer
 }
 
 // SyncSubtitles downloads and stores subtitles for a given IMDB code.
-// Returns the number of subtitles stored.
+// Downloads immediately after each search to avoid URL token expiration.
 func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int, error) {
 	if s.db == nil {
 		return 0, fmt.Errorf("no database configured")
 	}
 
 	log.Printf("[SubtitleSync] Syncing subtitles for %s (languages: %s)", imdbCode, languages)
-
-	result, err := s.SearchByIMDB(imdbCode, languages)
-	if err != nil {
-		return 0, fmt.Errorf("failed to search subtitles: %w", err)
-	}
-
-	if len(result.Subtitles) == 0 {
-		log.Printf("[SubtitleSync] No subtitles found for %s", imdbCode)
-		return 0, nil
-	}
-
-	// Group by language, pick top 3 per language
-	byLang := make(map[string][]Subtitle)
-	for _, sub := range result.Subtitles {
-		byLang[sub.Language] = append(byLang[sub.Language], sub)
-	}
+	imdb := strings.TrimPrefix(imdbCode, "tt")
 
 	stored := 0
-	for lang, subs := range byLang {
-		limit := 3
-		if len(subs) < limit {
-			limit = len(subs)
-		}
-		for i := 0; i < limit; i++ {
-			sub := subs[i]
-			vtt, err := s.DownloadSubtitle(sub.DownloadURL)
+	storedLangs := make(map[string]int) // track how many per language
+
+	// Phase 1: OpenSubtitles — search and download per-language immediately
+	// (download URLs contain vrf tokens that expire quickly)
+	if languages != "" {
+		for _, lang := range strings.Split(languages, ",") {
+			lang = strings.TrimSpace(lang)
+			if lang == "" {
+				continue
+			}
+			osLang := iso2ToOSLang(lang)
+			if osLang == "" {
+				continue
+			}
+			osResult, err := s.searchOpenSubtitlesREST(imdb, osLang)
 			if err != nil {
-				log.Printf("[SubtitleSync] Failed to download %s subtitle for %s: %v", lang, imdbCode, err)
+				log.Printf("[SubtitleSync] OpenSubtitles search error for %s: %v", lang, err)
 				continue
 			}
+			// Download top 3 immediately while URLs are fresh
+			count := s.syncDownloadSubtitles(imdbCode, lang, osResult.Subtitles, 3-storedLangs[lang])
+			storedLangs[lang] += count
+			stored += count
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
 
-			// Detect source from download URL
-			source := "subdl"
-			if strings.Contains(sub.DownloadURL, "opensubtitles.org") {
-				source = "opensubtitles"
-			}
-
-			storedSub := &models.StoredSubtitle{
-				ImdbCode:        imdbCode,
-				Language:        sub.Language,
-				LanguageName:    sub.LanguageName,
-				ReleaseName:     sub.ReleaseName,
-				HearingImpaired: sub.HearingImpaired,
-				Source:          source,
-			}
-			if err := s.db.CreateSubtitle(storedSub); err != nil {
-				log.Printf("[SubtitleSync] Failed to store subtitle: %v", err)
+	// Phase 2: SubDL — fill gaps for languages that still need subs
+	subdlResult, err := s.searchSubDL(imdb, languages)
+	if err != nil {
+		log.Printf("[SubtitleSync] SubDL search error: %v", err)
+	} else {
+		// Group SubDL results by language
+		byLang := make(map[string][]Subtitle)
+		for _, sub := range subdlResult.Subtitles {
+			byLang[sub.Language] = append(byLang[sub.Language], sub)
+		}
+		for lang, subs := range byLang {
+			need := 3 - storedLangs[lang]
+			if need <= 0 {
 				continue
 			}
-			if storedSub.ID == 0 {
-				log.Printf("[SubtitleSync] Skipped duplicate: %s %s", lang, sub.ReleaseName)
-				continue
-			}
-
-			// Write VTT to disk and update path
-			if vttPath, err := s.writeSubtitleFile(imdbCode, storedSub.ID, vtt); err != nil {
-				log.Printf("[SubtitleSync] Failed to write VTT file: %v", err)
-			} else {
-				s.db.UpdateSubtitlePath(storedSub.ID, vttPath)
-			}
-			stored++
-
-			// Rate limiting
-			time.Sleep(500 * time.Millisecond)
+			count := s.syncDownloadSubtitles(imdbCode, lang, subs, need)
+			storedLangs[lang] += count
+			stored += count
 		}
 	}
 
 	log.Printf("[SubtitleSync] Stored %d subtitles for %s", stored, imdbCode)
 	return stored, nil
+}
+
+// syncDownloadSubtitles downloads and stores up to `limit` subtitles from the list.
+func (s *SubtitleService) syncDownloadSubtitles(imdbCode, lang string, subs []Subtitle, limit int) int {
+	if limit <= 0 {
+		return 0
+	}
+	stored := 0
+	for i, sub := range subs {
+		if i >= limit {
+			break
+		}
+		vtt, err := s.DownloadSubtitle(sub.DownloadURL)
+		if err != nil {
+			log.Printf("[SubtitleSync] Failed to download %s subtitle for %s: %v", lang, imdbCode, err)
+			continue
+		}
+
+		source := "subdl"
+		if strings.Contains(sub.DownloadURL, "opensubtitles.org") {
+			source = "opensubtitles"
+		}
+
+		storedSub := &models.StoredSubtitle{
+			ImdbCode:        imdbCode,
+			Language:        sub.Language,
+			LanguageName:    sub.LanguageName,
+			ReleaseName:     sub.ReleaseName,
+			HearingImpaired: sub.HearingImpaired,
+			Source:          source,
+		}
+		if err := s.db.CreateSubtitle(storedSub); err != nil {
+			log.Printf("[SubtitleSync] Failed to store subtitle: %v", err)
+			continue
+		}
+		if storedSub.ID == 0 {
+			log.Printf("[SubtitleSync] Skipped duplicate: %s %s", lang, sub.ReleaseName)
+			continue
+		}
+
+		if vttPath, err := s.writeSubtitleFile(imdbCode, storedSub.ID, vtt); err != nil {
+			log.Printf("[SubtitleSync] Failed to write VTT file: %v", err)
+		} else {
+			s.db.UpdateSubtitlePath(storedSub.ID, vttPath)
+		}
+		stored++
+		time.Sleep(500 * time.Millisecond)
+	}
+	return stored
 }
 
 // ExtractSubtitlesFromTorrent reads subtitle files (.srt, .ass, etc.) from a loaded torrent
@@ -491,7 +524,7 @@ func (s *SubtitleService) searchOpenSubtitlesREST(imdbID string, osLang string) 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", opensubtitlesUA)
+	req.Header.Set("User-Agent", "OmniusServer v1.0")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
