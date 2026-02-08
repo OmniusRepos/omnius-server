@@ -88,18 +88,71 @@ func (h *APIHandler) MovieDetails(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, data)
 }
 
-// HomeSectionResponse is the response format for home sections
-type HomeSectionResponse struct {
-	ID          string         `json:"id"`
-	Title       string         `json:"title"`
-	Type        string         `json:"type"`         // data source: recent, top_rated, genre, curated_list, query
-	DisplayType string         `json:"display_type"` // UI layout: carousel, grid, featured, hero, banner, slider
-	Movies      []models.Movie `json:"movies,omitempty"`
+// HomeMovieSlim is a lightweight movie for home section cards (no torrents, synopsis, cast, etc.)
+type HomeMovieSlim struct {
+	ID               uint    `json:"id"`
+	Title            string  `json:"title"`
+	Year             uint    `json:"year"`
+	Rating           float32 `json:"rating"`
+	MediumCoverImage string  `json:"medium_cover_image"`
 }
 
-// HeroSliderResponse is returned for the hero slider specifically
-type HeroSliderResponse struct {
-	Movies []models.Movie `json:"movies"`
+// HomeMovieHero has more fields for the hero slider display
+type HomeMovieHero struct {
+	ID                      uint     `json:"id"`
+	Title                   string   `json:"title"`
+	Year                    uint     `json:"year"`
+	Rating                  float32  `json:"rating"`
+	Runtime                 uint     `json:"runtime"`
+	Genres                  []string `json:"genres"`
+	Summary                 string   `json:"summary"`
+	BackgroundImage         string   `json:"background_image"`
+	BackgroundImageOriginal string   `json:"background_image_original,omitempty"`
+	MediumCoverImage        string   `json:"medium_cover_image"`
+	LargeCoverImage         string   `json:"large_cover_image"`
+}
+
+// HomeSectionResponse is the response format for home sections
+type HomeSectionResponse struct {
+	ID          string          `json:"id"`
+	Title       string          `json:"title"`
+	Type        string          `json:"type"`         // data source: recent, top_rated, genre, curated_list, query
+	DisplayType string          `json:"display_type"` // UI layout: carousel, grid, featured, hero, banner, slider
+	Movies      []HomeMovieSlim `json:"movies,omitempty"`
+}
+
+func toSlimMovie(m models.Movie) HomeMovieSlim {
+	return HomeMovieSlim{
+		ID:               m.ID,
+		Title:            m.Title,
+		Year:             m.Year,
+		Rating:           m.Rating,
+		MediumCoverImage: m.MediumCoverImage,
+	}
+}
+
+func toSlimMovies(movies []models.Movie) []HomeMovieSlim {
+	slim := make([]HomeMovieSlim, len(movies))
+	for i, m := range movies {
+		slim[i] = toSlimMovie(m)
+	}
+	return slim
+}
+
+func toHeroMovie(m models.Movie) HomeMovieHero {
+	return HomeMovieHero{
+		ID:                      m.ID,
+		Title:                   m.Title,
+		Year:                    m.Year,
+		Rating:                  m.Rating,
+		Runtime:                 m.Runtime,
+		Genres:                  m.Genres,
+		Summary:                 m.Summary,
+		BackgroundImage:         m.BackgroundImage,
+		BackgroundImageOriginal: m.BackgroundImageOriginal,
+		MediumCoverImage:        m.MediumCoverImage,
+		LargeCoverImage:         m.LargeCoverImage,
+	}
 }
 
 // Home handles GET /api/v2/home.json - returns home page content
@@ -116,63 +169,55 @@ func (h *APIHandler) Home(w http.ResponseWriter, r *http.Request) {
 		for _, s := range dbSections {
 			var movies []models.Movie
 
-			// Hero/Banner sections with specific content_id
+			// Hero/Banner sections with specific content_id — skip from sections (handled in hero_slider)
 			if (s.DisplayType == "hero" || s.DisplayType == "banner") && s.ContentID != nil {
-				if s.ContentType == "movie" {
-					movie, err := h.db.GetMovie(*s.ContentID)
-					if err == nil && movie != nil {
-						movies = []models.Movie{*movie}
+				continue
+			}
+
+			// Query-based sections (carousel, grid, featured, top10)
+			switch s.SectionType {
+			case "top_viewed":
+				movies, _ = h.db.GetTopMovies(7, s.Genre, s.LimitCount)
+			case "recent":
+				movies, _, _ = h.db.ListMovies(database.MovieFilter{
+					Limit:   s.LimitCount,
+					Page:    1,
+					SortBy:  "date_uploaded",
+					OrderBy: "desc",
+				})
+			case "top_rated":
+				movies, _, _ = h.db.ListMovies(database.MovieFilter{
+					Limit:         s.LimitCount,
+					Page:          1,
+					MinimumRating: s.MinimumRating,
+					SortBy:        "rating",
+					OrderBy:       "desc",
+				})
+			case "genre":
+				movies, _, _ = h.db.ListMovies(database.MovieFilter{
+					Limit:         s.LimitCount,
+					Page:          1,
+					Genre:         s.Genre,
+					MinimumRating: s.MinimumRating,
+					SortBy:        s.SortBy,
+					OrderBy:       s.OrderBy,
+				})
+			case "curated_list":
+				if s.CuratedListID != nil {
+					list, err := h.db.GetCuratedListByID(*s.CuratedListID)
+					if err == nil {
+						movies, _ = h.db.GetCuratedListMovies(list)
 					}
 				}
-				// TODO: Handle series and channels for hero/banner
-			} else {
-				// Query-based sections (carousel, grid, featured, top10)
-				switch s.SectionType {
-				case "top_viewed":
-					// Get top movies from analytics (last 7 days)
-					movies, _ = h.db.GetTopMovies(7, s.Genre, s.LimitCount)
-				case "recent":
-					movies, _, _ = h.db.ListMovies(database.MovieFilter{
-						Limit:   s.LimitCount,
-						Page:    1,
-						SortBy:  "date_uploaded",
-						OrderBy: "desc",
-					})
-				case "top_rated":
-					movies, _, _ = h.db.ListMovies(database.MovieFilter{
-						Limit:         s.LimitCount,
-						Page:          1,
-						MinimumRating: s.MinimumRating,
-						SortBy:        "rating",
-						OrderBy:       "desc",
-					})
-				case "genre":
-					movies, _, _ = h.db.ListMovies(database.MovieFilter{
-						Limit:         s.LimitCount,
-						Page:          1,
-						Genre:         s.Genre,
-						MinimumRating: s.MinimumRating,
-						SortBy:        s.SortBy,
-						OrderBy:       s.OrderBy,
-					})
-				case "curated_list":
-					if s.CuratedListID != nil {
-						list, err := h.db.GetCuratedListByID(*s.CuratedListID)
-						if err == nil {
-							movies, _ = h.db.GetCuratedListMovies(list)
-						}
-					}
-				default:
-					// Default query with custom sort/filter
-					movies, _, _ = h.db.ListMovies(database.MovieFilter{
-						Limit:         s.LimitCount,
-						Page:          1,
-						MinimumRating: s.MinimumRating,
-						Genre:         s.Genre,
-						SortBy:        s.SortBy,
-						OrderBy:       s.OrderBy,
-					})
-				}
+			default:
+				movies, _, _ = h.db.ListMovies(database.MovieFilter{
+					Limit:         s.LimitCount,
+					Page:          1,
+					MinimumRating: s.MinimumRating,
+					Genre:         s.Genre,
+					SortBy:        s.SortBy,
+					OrderBy:       s.OrderBy,
+				})
 			}
 
 			if len(movies) > 0 {
@@ -181,20 +226,20 @@ func (h *APIHandler) Home(w http.ResponseWriter, r *http.Request) {
 					Title:       s.Title,
 					Type:        s.SectionType,
 					DisplayType: s.DisplayType,
-					Movies:      movies,
+					Movies:      toSlimMovies(movies),
 				})
 			}
 		}
 	}
 
 	// Build hero slider from all hero/banner sections
-	var heroSlider []models.Movie
+	var heroSlider []HomeMovieHero
 	for _, s := range dbSections {
 		if (s.DisplayType == "hero" || s.DisplayType == "banner" || s.DisplayType == "slider") && s.ContentID != nil {
 			if s.ContentType == "movie" {
 				movie, err := h.db.GetMovie(*s.ContentID)
 				if err == nil && movie != nil {
-					heroSlider = append(heroSlider, *movie)
+					heroSlider = append(heroSlider, toHeroMovie(*movie))
 				}
 			}
 		}
@@ -209,7 +254,9 @@ func (h *APIHandler) Home(w http.ResponseWriter, r *http.Request) {
 			SortBy:        "rating",
 			OrderBy:       "desc",
 		})
-		heroSlider = topMovies
+		for _, m := range topMovies {
+			heroSlider = append(heroSlider, toHeroMovie(m))
+		}
 	}
 
 	writeSuccess(w, map[string]interface{}{
@@ -227,7 +274,7 @@ func (h *APIHandler) getDefaultHomeSections() []HomeSectionResponse {
 		Limit: 10, Page: 1, SortBy: "date_uploaded", OrderBy: "desc",
 	})
 	if len(recentMovies) > 0 {
-		sections = append(sections, HomeSectionResponse{ID: "recently_added", Title: "Recently Added", Type: "recent", DisplayType: "carousel", Movies: recentMovies})
+		sections = append(sections, HomeSectionResponse{ID: "recently_added", Title: "Recently Added", Type: "recent", DisplayType: "carousel", Movies: toSlimMovies(recentMovies)})
 	}
 
 	// Top Rated
@@ -235,7 +282,7 @@ func (h *APIHandler) getDefaultHomeSections() []HomeSectionResponse {
 		Limit: 10, Page: 1, MinimumRating: 7.0, SortBy: "rating", OrderBy: "desc",
 	})
 	if len(topRated) > 0 {
-		sections = append(sections, HomeSectionResponse{ID: "top_rated", Title: "Top Rated", Type: "top_rated", DisplayType: "carousel", Movies: topRated})
+		sections = append(sections, HomeSectionResponse{ID: "top_rated", Title: "Top Rated", Type: "top_rated", DisplayType: "carousel", Movies: toSlimMovies(topRated)})
 	}
 
 	// Curated lists
@@ -243,7 +290,7 @@ func (h *APIHandler) getDefaultHomeSections() []HomeSectionResponse {
 	for _, list := range curatedLists {
 		movies, _ := h.db.GetCuratedListMovies(&list)
 		if len(movies) > 0 {
-			sections = append(sections, HomeSectionResponse{ID: "curated_" + list.Slug, Title: list.Name, Type: "curated_list", DisplayType: "carousel", Movies: movies})
+			sections = append(sections, HomeSectionResponse{ID: "curated_" + list.Slug, Title: list.Name, Type: "curated_list", DisplayType: "carousel", Movies: toSlimMovies(movies)})
 		}
 	}
 
