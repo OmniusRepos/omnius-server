@@ -389,6 +389,52 @@ func (d *DB) migrate() error {
 		}
 	}
 
+	// Seed default home sections — re-seed if missing Netflix-style sections
+	var homeSectionCount int
+	d.QueryRow("SELECT COUNT(*) FROM home_sections WHERE display_type = 'top10'").Scan(&homeSectionCount)
+	if homeSectionCount == 0 {
+		// Clear old sections and re-create with Netflix-style layout
+		d.Exec("DELETE FROM home_sections")
+		defaultHomeSections := []string{
+			// Hero
+			`INSERT INTO home_sections (section_id, title, display_type, content_type, content_id, section_type, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('hero_featured', 'Featured', 'hero', 'movie', 243, '', 'rating', 'desc', 0, 1, 1, 0)`,
+			// Top 10
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('top_10', 'Top 10 on Omnius Today', 'top10', 'top_rated', 'rating', 'desc', 7.0, 10, 1, 1)`,
+			// Trending
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('trending', 'Trending Now', 'carousel', 'top_viewed', 'download_count', 'desc', 0, 20, 1, 2)`,
+			// Recently Added
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('recently_added', 'New on Omnius', 'carousel', 'recent', 'date_uploaded', 'desc', 0, 20, 1, 3)`,
+			// Top Rated
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('top_rated', 'Critically Acclaimed', 'top10', 'top_rated', 'rating', 'desc', 8.0, 10, 1, 4)`,
+			// Action
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, genre, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('action', 'Action & Adventure', 'carousel', 'genre', 'Action', 'rating', 'desc', 5.0, 20, 1, 5)`,
+			// Comedy
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, genre, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('comedy', 'Comedy', 'carousel', 'genre', 'Comedy', 'rating', 'desc', 5.0, 20, 1, 6)`,
+			// Sci-Fi
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, genre, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('scifi', 'Sci-Fi & Fantasy', 'carousel', 'genre', 'Sci-Fi', 'rating', 'desc', 5.0, 20, 1, 7)`,
+			// Horror
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, genre, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('horror', 'Horror', 'carousel', 'genre', 'Horror', 'rating', 'desc', 4.0, 20, 1, 8)`,
+			// Drama
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, genre, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('drama', 'Drama', 'carousel', 'genre', 'Drama', 'rating', 'desc', 6.0, 20, 1, 9)`,
+			// Thriller
+			`INSERT INTO home_sections (section_id, title, display_type, section_type, genre, sort_by, order_by, minimum_rating, limit_count, is_active, display_order)
+			 VALUES ('thriller', 'Thrillers', 'carousel', 'genre', 'Thriller', 'rating', 'desc', 5.0, 20, 1, 10)`,
+		}
+		for _, s := range defaultHomeSections {
+			d.Exec(s)
+		}
+	}
+
 	// Channels tables (IPTV)
 	channelMigrations := []string{
 		`CREATE TABLE IF NOT EXISTS channels (
