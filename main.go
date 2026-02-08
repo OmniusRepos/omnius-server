@@ -207,12 +207,9 @@ func main() {
 		r.Get("/curated_lists.json", curatedHandler.ListCuratedLists)
 		r.Get("/curated_list.json", curatedHandler.GetCuratedList)
 
-		// Analytics (public - for recording views and stream tracking)
-		r.Post("/analytics/view", analyticsHandler.RecordView)
+		// Analytics (public - unified event endpoint + read endpoints)
+		r.Post("/analytics", analyticsHandler.HandleEvent)
 		r.Get("/analytics/top-movies", analyticsHandler.GetTopMoviesAPI)
-		r.Post("/analytics/stream/start", analyticsHandler.StreamStart)
-		r.Post("/analytics/stream/heartbeat", analyticsHandler.StreamHeartbeat)
-		r.Post("/analytics/stream/end", analyticsHandler.StreamEnd)
 
 		// Subtitles
 		r.Get("/subtitles/search", subtitleHandler.Search)

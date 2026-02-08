@@ -394,92 +394,18 @@ func (h *AnalyticsHandler) getHourlyActivity() []int {
 	return activity
 }
 
-// StreamStart handles POST /api/analytics/stream/start
-func (h *AnalyticsHandler) StreamStart(w http.ResponseWriter, r *http.Request) {
+// HandleEvent handles POST /api/v2/analytics - unified analytics endpoint.
+// Responds immediately and processes the event in the background (nonblocking).
+func (h *AnalyticsHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Event       string `json:"event"`
 		DeviceID    string `json:"device_id"`
 		ContentType string `json:"content_type"`
 		ContentID   uint   `json:"content_id"`
 		ImdbCode    string `json:"imdb_code"`
 		Quality     string `json:"quality"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	if req.DeviceID == "" {
-		req.DeviceID = "anonymous"
-	}
-	if req.ContentType == "" {
-		req.ContentType = "movie"
-	}
-
-	err := h.db.StartStream(req.DeviceID, req.ContentType, req.ContentID, req.ImdbCode, req.Quality)
-	if err != nil {
-		http.Error(w, "Failed to start stream tracking", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
-// StreamHeartbeat handles POST /api/analytics/stream/heartbeat
-func (h *AnalyticsHandler) StreamHeartbeat(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		DeviceID string `json:"device_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	if req.DeviceID == "" {
-		http.Error(w, "device_id required", http.StatusBadRequest)
-		return
-	}
-
-	h.db.HeartbeatStream(req.DeviceID)
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
-// StreamEnd handles POST /api/analytics/stream/end
-func (h *AnalyticsHandler) StreamEnd(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		DeviceID string `json:"device_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	if req.DeviceID == "" {
-		http.Error(w, "device_id required", http.StatusBadRequest)
-		return
-	}
-
-	h.db.EndStream(req.DeviceID)
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
-// RecordView handles POST /api/analytics/view
-func (h *AnalyticsHandler) RecordView(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ContentType string `json:"content_type"`
-		ContentID   uint   `json:"content_id"`
-		ImdbCode    string `json:"imdb_code"`
-		DeviceID    string `json:"device_id"`
 		Duration    int    `json:"duration"`
 		Completed   bool   `json:"completed"`
-		Quality     string `json:"quality"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -487,22 +413,47 @@ func (h *AnalyticsHandler) RecordView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ContentType == "" {
-		req.ContentType = "movie"
+	if req.Event == "" {
+		http.Error(w, "Missing event field", http.StatusBadRequest)
+		return
 	}
 
 	if req.DeviceID == "" {
 		req.DeviceID = "anonymous"
 	}
+	if req.ContentType == "" {
+		req.ContentType = "movie"
+	}
 
-	err := h.db.RecordView(req.ContentType, req.ContentID, req.ImdbCode, req.DeviceID, req.Duration, req.Completed, req.Quality)
-	if err != nil {
-		http.Error(w, "Failed to record view", http.StatusInternalServerError)
+	// Validate event type before responding
+	switch req.Event {
+	case "view", "stream_start", "stream_heartbeat", "stream_end":
+		// valid
+	default:
+		http.Error(w, "Unknown event: "+req.Event, http.StatusBadRequest)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	// Respond immediately - process in background
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	go func() {
+		switch req.Event {
+		case "view":
+			if err := h.db.RecordView(req.ContentType, req.ContentID, req.ImdbCode, req.DeviceID, req.Duration, req.Completed, req.Quality); err != nil {
+				fmt.Printf("[analytics] view error: %v\n", err)
+			}
+		case "stream_start":
+			if err := h.db.StartStream(req.DeviceID, req.ContentType, req.ContentID, req.ImdbCode, req.Quality); err != nil {
+				fmt.Printf("[analytics] stream_start error: %v\n", err)
+			}
+		case "stream_heartbeat":
+			h.db.HeartbeatStream(req.DeviceID)
+		case "stream_end":
+			h.db.EndStream(req.DeviceID)
+		}
+	}()
 }
 
 // GetTopMovies handles GET /api/analytics/top-movies
