@@ -61,14 +61,22 @@ func (h *APIHandler) ListMovies(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) MovieDetails(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
+	var movie *models.Movie
+	var err error
+
 	movieID := parseInt(q.Get("movie_id"), 0)
-	if movieID == 0 {
-		writeError(w, "movie_id is required")
+	imdbID := q.Get("imdb_id")
+
+	if movieID > 0 {
+		movie, err = h.db.GetMovie(uint(movieID))
+	} else if imdbID != "" {
+		movie, err = h.db.GetMovieByIMDB(imdbID)
+	} else {
+		writeError(w, "movie_id or imdb_id is required")
 		return
 	}
 
-	movie, err := h.db.GetMovie(uint(movieID))
-	if err != nil {
+	if err != nil || movie == nil {
 		writeError(w, "Movie not found")
 		return
 	}
