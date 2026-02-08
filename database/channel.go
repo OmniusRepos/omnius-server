@@ -282,8 +282,32 @@ func (d *DB) GetChannelStats() (map[string]int, error) {
 	stats["categories"] = count
 	d.QueryRow("SELECT COUNT(*) FROM channels WHERE stream_url != '' AND stream_url IS NOT NULL").Scan(&count)
 	stats["with_streams"] = count
+	d.QueryRow("SELECT COUNT(*) FROM channel_blocklist").Scan(&count)
+	stats["blocklisted"] = count
 
 	return stats, nil
+}
+
+// GetAllChannelsWithStreams returns all channels that have a non-empty stream URL
+func (d *DB) GetAllChannelsWithStreams() ([]models.Channel, error) {
+	rows, err := d.Query(`
+		SELECT id, name, country, languages, categories, logo, stream_url
+		FROM channels
+		WHERE stream_url IS NOT NULL AND stream_url != ''
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var channels []models.Channel
+	for rows.Next() {
+		c := scanChannel(rows)
+		if c != nil {
+			channels = append(channels, *c)
+		}
+	}
+	return channels, nil
 }
 
 // --- Helper ---
@@ -313,6 +337,56 @@ func scanChannel(rows *sql.Rows) *models.Channel {
 func (d *DB) UpdateChannelStream(channelID, streamURL string) error {
 	_, err := d.Exec("UPDATE channels SET stream_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", streamURL, channelID)
 	return err
+}
+
+// --- Blocklist methods ---
+
+// AddToBlocklist adds a channel ID to the blocklist
+func (d *DB) AddToBlocklist(channelID, reason string) error {
+	_, err := d.Exec(`
+		INSERT INTO channel_blocklist (channel_id, reason, blocked_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(channel_id) DO UPDATE SET reason = excluded.reason, blocked_at = CURRENT_TIMESTAMP
+	`, channelID, reason)
+	return err
+}
+
+// IsBlocklisted checks if a channel ID is in the blocklist
+func (d *DB) IsBlocklisted(channelID string) bool {
+	var count int
+	d.QueryRow("SELECT COUNT(*) FROM channel_blocklist WHERE channel_id = ?", channelID).Scan(&count)
+	return count > 0
+}
+
+// GetBlocklistCount returns the number of blocklisted channels
+func (d *DB) GetBlocklistCount() int {
+	var count int
+	d.QueryRow("SELECT COUNT(*) FROM channel_blocklist").Scan(&count)
+	return count
+}
+
+// ClearBlocklist removes all entries from the blocklist
+func (d *DB) ClearBlocklist() error {
+	_, err := d.Exec("DELETE FROM channel_blocklist")
+	return err
+}
+
+// GetBlocklistedIDs returns all blocklisted channel IDs as a map for fast lookup
+func (d *DB) GetBlocklistedIDs() map[string]bool {
+	result := make(map[string]bool)
+	rows, err := d.Query("SELECT channel_id FROM channel_blocklist")
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			result[id] = true
+		}
+	}
+	return result
 }
 
 // GetChannelCountByCategory returns the count of channels per category

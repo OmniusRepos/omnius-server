@@ -10,6 +10,9 @@
     syncIPTVChannels,
     getIPTVSyncStatus,
     deleteChannel,
+    startHealthCheck,
+    getHealthCheckStatus,
+    clearBlocklist,
     type Channel,
     type ChannelCountry,
     type ChannelCategory,
@@ -27,7 +30,7 @@
   let selectedCategory = '';
 
   // Stats
-  let stats = { channels: 0, countries: 0, categories: 0, with_streams: 0 };
+  let stats = { channels: 0, countries: 0, categories: 0, with_streams: 0, blocklisted: 0 };
 
   // Sync state
   let syncing = false;
@@ -37,6 +40,16 @@
   let lastSync = '';
   let syncError = '';
   let syncPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  // Health check state
+  let healthChecking = false;
+  let healthPhase = '';
+  let healthTotal = 0;
+  let healthChecked = 0;
+  let healthRemoved = 0;
+  let healthError = '';
+  let healthPollInterval: ReturnType<typeof setInterval> | null = null;
+  let showClearBlocklistConfirm = false;
 
   // M3U settings
   let m3uUrl = '';
@@ -52,11 +65,12 @@
   $: totalPages = Math.ceil(total / limit);
 
   onMount(async () => {
-    await Promise.all([loadChannels(), loadFilters(), loadStats(), checkSyncStatus(), loadSettings()]);
+    await Promise.all([loadChannels(), loadFilters(), loadStats(), checkSyncStatus(), loadSettings(), checkHealthStatus()]);
   });
 
   onDestroy(() => {
     if (syncPollInterval) clearInterval(syncPollInterval);
+    if (healthPollInterval) clearInterval(healthPollInterval);
   });
 
   async function loadChannels() {
@@ -167,6 +181,72 @@
         // ignore
       }
     }, 2000);
+  }
+
+  async function checkHealthStatus() {
+    try {
+      const status = await getHealthCheckStatus();
+      healthChecking = status.running;
+      healthPhase = status.phase;
+      healthTotal = status.total;
+      healthChecked = status.checked;
+      healthRemoved = status.removed;
+      healthError = status.last_error || '';
+
+      if (healthChecking) {
+        startHealthPolling();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleHealthCheck() {
+    try {
+      await startHealthCheck();
+      healthChecking = true;
+      healthPhase = 'starting';
+      healthChecked = 0;
+      healthTotal = 0;
+      healthRemoved = 0;
+      healthError = '';
+      startHealthPolling();
+    } catch (err: any) {
+      healthError = err.message || 'Health check failed';
+    }
+  }
+
+  function startHealthPolling() {
+    if (healthPollInterval) clearInterval(healthPollInterval);
+    healthPollInterval = setInterval(async () => {
+      try {
+        const status = await getHealthCheckStatus();
+        healthChecking = status.running;
+        healthPhase = status.phase;
+        healthTotal = status.total;
+        healthChecked = status.checked;
+        healthRemoved = status.removed;
+        healthError = status.last_error || '';
+
+        if (!status.running) {
+          clearInterval(healthPollInterval!);
+          healthPollInterval = null;
+          await Promise.all([loadChannels(), loadStats()]);
+        }
+      } catch {
+        // ignore
+      }
+    }, 2000);
+  }
+
+  async function handleClearBlocklist() {
+    try {
+      await clearBlocklist();
+      showClearBlocklistConfirm = false;
+      await loadStats();
+    } catch (err: any) {
+      healthError = err.message || 'Failed to clear blocklist';
+    }
   }
 
   function handleSearch() {
@@ -310,6 +390,53 @@
         {syncing ? 'SYNCING...' : 'SYNC'}
       </button>
     </div>
+  </div>
+
+  <!-- Stream Health Section -->
+  <div class="health-section">
+    <div class="health-header">
+      <div>
+        <label class="m3u-label">Stream Health Check</label>
+        <span class="health-subtitle">Check all streams and blocklist dead channels</span>
+      </div>
+      <div class="health-actions">
+        {#if stats.blocklisted > 0}
+          <span class="blocklist-count">{stats.blocklisted} blocklisted</span>
+          <button class="btn btn-secondary btn-sm" on:click={() => showClearBlocklistConfirm = true}>Clear Blocklist</button>
+        {/if}
+        <button class="btn btn-primary btn-sm" on:click={handleHealthCheck} disabled={healthChecking}>
+          {healthChecking ? 'CHECKING...' : 'RUN HEALTH CHECK'}
+        </button>
+      </div>
+    </div>
+
+    {#if healthChecking}
+      <div class="sync-banner health-banner">
+        <div class="sync-info">
+          <span class="sync-spinner"></span>
+          <span class="sync-text">{healthPhase}</span>
+          {#if healthTotal > 0}
+            <span class="sync-progress">({healthChecked}/{healthTotal})</span>
+          {/if}
+          {#if healthRemoved > 0}
+            <span class="health-removed">{healthRemoved} removed</span>
+          {/if}
+        </div>
+        <div class="sync-bar">
+          <div class="sync-bar-fill" style="width: {healthTotal > 0 ? (healthChecked / healthTotal * 100) : 0}%"></div>
+        </div>
+      </div>
+    {/if}
+
+    {#if !healthChecking && healthPhase === 'completed'}
+      <div class="health-completed">
+        Completed: {healthChecked} checked, {healthRemoved} removed
+      </div>
+    {/if}
+
+    {#if healthError}
+      <div class="sync-error">Health check error: {healthError}</div>
+    {/if}
   </div>
 
   <!-- View Mode Tabs -->
@@ -473,6 +600,20 @@
   </div>
 {/if}
 
+<!-- Clear Blocklist Confirmation -->
+{#if showClearBlocklistConfirm}
+  <div class="modal-backdrop" on:click={() => showClearBlocklistConfirm = false} on:keydown={(e) => e.key === 'Escape' && (showClearBlocklistConfirm = false)}>
+    <div class="modal-content" on:click|stopPropagation on:keydown|stopPropagation>
+      <h3>Clear Blocklist</h3>
+      <p>This will remove all {stats.blocklisted} entries from the blocklist. Previously dead channels may reappear on the next sync.</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" on:click={() => showClearBlocklistConfirm = false}>Cancel</button>
+        <button class="btn btn-danger" on:click={handleClearBlocklist}>Clear All</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .channels-page {
     padding: 0;
@@ -612,6 +753,63 @@
     border-radius: 8px;
     margin-bottom: 16px;
     font-size: 0.9rem;
+  }
+
+  .health-section {
+    background: var(--bg-card, #1c2128);
+    border: 1px solid var(--bg-tertiary, #21262d);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+  }
+
+  .health-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .health-subtitle {
+    font-size: 0.8rem;
+    color: var(--text-secondary, #8b949e);
+  }
+
+  .health-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .blocklist-count {
+    font-size: 0.8rem;
+    color: var(--accent-red, #e94560);
+    background: rgba(233, 69, 96, 0.1);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+
+  .health-banner {
+    margin-top: 12px;
+    margin-bottom: 0;
+  }
+
+  .health-removed {
+    color: var(--accent-red, #e94560);
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+
+  .health-completed {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: rgba(46, 160, 67, 0.1);
+    border: 1px solid rgba(46, 160, 67, 0.3);
+    border-radius: 6px;
+    color: var(--accent-green, #2ea043);
+    font-size: 0.85rem;
   }
 
   .view-tabs {

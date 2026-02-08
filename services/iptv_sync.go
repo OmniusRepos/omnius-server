@@ -113,13 +113,19 @@ func (s *IPTVSyncService) doM3USync(m3uURL string) error {
 
 	log.Printf("[IPTV Sync] Parsed %d channels from M3U", len(channels))
 
-	// 3. Store channels
+	// 3. Store channels (skip blocklisted)
+	blocklist := s.db.GetBlocklistedIDs()
 	total := len(channels)
 	stored := 0
+	skipped := 0
 	countrySeen := make(map[string]bool)
 	categorySeen := make(map[string]bool)
 
 	for i, ch := range channels {
+		if blocklist[ch.ID] {
+			skipped++
+			continue
+		}
 		if i%500 == 0 {
 			s.setPhase("storing channels", i, total)
 		}
@@ -157,8 +163,8 @@ func (s *IPTVSyncService) doM3USync(m3uURL string) error {
 	s.status.Categories = len(categorySeen)
 	s.mu.Unlock()
 
-	log.Printf("[IPTV Sync] Stored %d channels, %d countries, %d categories",
-		stored, len(countrySeen), len(categorySeen))
+	log.Printf("[IPTV Sync] Stored %d channels, %d countries, %d categories (skipped %d blocklisted)",
+		stored, len(countrySeen), len(categorySeen), skipped)
 
 	return nil
 }

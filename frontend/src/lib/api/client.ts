@@ -432,6 +432,31 @@ export async function deleteChannel(id: string) {
   return request(`${API_BASE}/channels/${id}`, { method: 'DELETE' });
 }
 
+export async function startHealthCheck() {
+  return request<{ status: string; message: string }>(`${API_BASE}/channels/health-check`, {
+    method: 'POST',
+  });
+}
+
+export async function getHealthCheckStatus() {
+  return request<{
+    running: boolean;
+    phase: string;
+    total: number;
+    checked: number;
+    removed: number;
+    started_at?: string;
+    completed_at?: string;
+    last_error?: string;
+  }>(`${API_BASE}/channels/health-check/status`);
+}
+
+export async function clearBlocklist() {
+  return request<{ status: string; message: string }>(`${API_BASE}/channels/blocklist`, {
+    method: 'DELETE',
+  });
+}
+
 // Server Services Config
 export interface ServiceConfig {
   id: string;

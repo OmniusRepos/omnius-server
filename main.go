@@ -355,6 +355,9 @@ func main() {
 			r.Get("/api/channels/stats", channelHandler.ChannelStats)
 			r.Get("/api/channels/settings", channelHandler.GetChannelSettings)
 			r.Put("/api/channels/settings", channelHandler.UpdateM3UURL)
+			r.Post("/api/channels/health-check", channelHandler.StartHealthCheck)
+			r.Get("/api/channels/health-check/status", channelHandler.GetHealthCheckStatus)
+			r.Delete("/api/channels/blocklist", channelHandler.ClearBlocklist)
 			r.Delete("/api/channels/{id}", channelHandler.DeleteChannel)
 
 			// Sync/Refresh admin API

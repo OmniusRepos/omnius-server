@@ -440,6 +440,18 @@ func (d *DB) migrate() error {
 		d.Exec(m)
 	}
 
+	// Channel blocklist table
+	blocklistMigrations := []string{
+		`CREATE TABLE IF NOT EXISTS channel_blocklist (
+			channel_id TEXT PRIMARY KEY,
+			reason TEXT DEFAULT 'dead_stream',
+			blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+	}
+	for _, m := range blocklistMigrations {
+		d.Exec(m)
+	}
+
 	// Subtitles table
 	subtitleMigrations := []string{
 		`CREATE TABLE IF NOT EXISTS subtitles (

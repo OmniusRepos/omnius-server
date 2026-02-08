@@ -12,14 +12,16 @@ import (
 )
 
 type ChannelHandler struct {
-	db          *database.DB
-	iptvService *services.IPTVSyncService
+	db            *database.DB
+	iptvService   *services.IPTVSyncService
+	healthService *services.ChannelHealthService
 }
 
 func NewChannelHandler(db *database.DB) *ChannelHandler {
 	return &ChannelHandler{
-		db:          db,
-		iptvService: services.NewIPTVSyncService(db),
+		db:            db,
+		iptvService:   services.NewIPTVSyncService(db),
+		healthService: services.NewChannelHealthService(db),
 	}
 }
 
@@ -229,6 +231,51 @@ func (h *ChannelHandler) ChannelStats(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
+}
+
+// StartHealthCheck handles POST /admin/api/channels/health-check
+func (h *ChannelHandler) StartHealthCheck(w http.ResponseWriter, r *http.Request) {
+	if err := h.healthService.RunHealthCheck(); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"message": "Health check started",
+	})
+}
+
+// GetHealthCheckStatus handles GET /admin/api/channels/health-check/status
+func (h *ChannelHandler) GetHealthCheckStatus(w http.ResponseWriter, r *http.Request) {
+	status := h.healthService.GetStatus()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+// ClearBlocklist handles DELETE /admin/api/channels/blocklist
+func (h *ChannelHandler) ClearBlocklist(w http.ResponseWriter, r *http.Request) {
+	if err := h.db.ClearBlocklist(); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"message": "Blocklist cleared",
+	})
 }
 
 // DeleteChannel handles DELETE /admin/api/channels/{id}
