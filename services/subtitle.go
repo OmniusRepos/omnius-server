@@ -67,23 +67,27 @@ func (s *SubtitleService) SyncSubtitles(imdbCode string, languages string) (int,
 	storedLangs := make(map[string]int)
 
 	// Use SubDL for sync (OpenSubtitles blocks downloads from server IPs)
-	subdlResult, err := s.searchSubDL(imdb, languages)
-	if err != nil {
-		log.Printf("[SubtitleSync] SubDL search error: %v", err)
-	} else {
-		byLang := make(map[string][]Subtitle)
-		for _, sub := range subdlResult.Subtitles {
-			byLang[sub.Language] = append(byLang[sub.Language], sub)
+	// Query per-language to ensure coverage (bulk query returns max ~10 results total)
+	langs := strings.Split(languages, ",")
+	for _, lang := range langs {
+		lang = strings.TrimSpace(lang)
+		if lang == "" || storedLangs[lang] >= 3 {
+			continue
 		}
-		for lang, subs := range byLang {
-			need := 3 - storedLangs[lang]
-			if need <= 0 {
-				continue
-			}
-			count := s.syncDownloadSubtitles(imdbCode, lang, subs, need)
-			storedLangs[lang] += count
-			stored += count
+		subdlResult, err := s.searchSubDL(imdb, lang)
+		if err != nil {
+			log.Printf("[SubtitleSync] SubDL search error for %s: %v", lang, err)
+			continue
 		}
+		if len(subdlResult.Subtitles) == 0 {
+			log.Printf("[SubtitleSync] No SubDL results for %s", lang)
+			continue
+		}
+		need := 3 - storedLangs[lang]
+		count := s.syncDownloadSubtitles(imdbCode, lang, subdlResult.Subtitles, need)
+		storedLangs[lang] += count
+		stored += count
+		time.Sleep(300 * time.Millisecond) // rate limit
 	}
 
 	log.Printf("[SubtitleSync] Stored %d subtitles for %s", stored, imdbCode)
