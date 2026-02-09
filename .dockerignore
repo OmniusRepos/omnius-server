@@ -1,0 +1,9 @@
+data/omnius.db
+data/omnius.db-shm
+data/omnius.db-wal
+data/downloads/
+data/.machine-id
+data/.license-cache.json
+data/subtitles/
+frontend/node_modules/
+.git/
