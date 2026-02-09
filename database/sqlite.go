@@ -498,6 +498,53 @@ func (d *DB) migrate() error {
 		d.Exec(m)
 	}
 
+	// License tables
+	licenseMigrations := []string{
+		`CREATE TABLE IF NOT EXISTS licenses (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			license_key TEXT UNIQUE NOT NULL,
+			plan TEXT NOT NULL DEFAULT 'personal',
+			owner_email TEXT,
+			owner_name TEXT,
+			max_deployments INTEGER DEFAULT 1,
+			is_active INTEGER DEFAULT 1,
+			notes TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			expires_at DATETIME,
+			revoked_at DATETIME
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_licenses_key ON licenses(license_key)",
+		`CREATE TABLE IF NOT EXISTS license_deployments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			license_id INTEGER NOT NULL,
+			machine_fingerprint TEXT NOT NULL,
+			machine_label TEXT,
+			ip_address TEXT,
+			server_version TEXT,
+			first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_heartbeat DATETIME DEFAULT CURRENT_TIMESTAMP,
+			is_active INTEGER DEFAULT 1,
+			FOREIGN KEY (license_id) REFERENCES licenses(id) ON DELETE CASCADE,
+			UNIQUE(license_id, machine_fingerprint)
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_deployments_license ON license_deployments(license_id)",
+		"CREATE INDEX IF NOT EXISTS idx_deployments_fingerprint ON license_deployments(machine_fingerprint)",
+		`CREATE TABLE IF NOT EXISTS license_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			license_id INTEGER NOT NULL,
+			event_type TEXT NOT NULL,
+			machine_fingerprint TEXT,
+			ip_address TEXT,
+			details TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (license_id) REFERENCES licenses(id) ON DELETE CASCADE
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_events_license ON license_events(license_id)",
+	}
+	for _, m := range licenseMigrations {
+		d.Exec(m)
+	}
+
 	// Subtitles table
 	subtitleMigrations := []string{
 		`CREATE TABLE IF NOT EXISTS subtitles (

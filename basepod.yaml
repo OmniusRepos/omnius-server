@@ -6,5 +6,7 @@ domains:
 build:
     dockerfile: Dockerfile
     context: .
+env:
+  LICENSE_SERVER_MODE: "true"
 volumes:
   - omnius-data:/app/data

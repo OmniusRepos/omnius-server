@@ -523,6 +523,85 @@ export async function syncSubtitles(imdbCode: string, languages = 'en,sq,es,fr,d
   });
 }
 
+// Licenses
+export interface License {
+  id: number;
+  license_key: string;
+  plan: string;
+  owner_email: string;
+  owner_name: string;
+  max_deployments: number;
+  is_active: boolean;
+  notes?: string;
+  created_at: string;
+  expires_at?: string;
+  revoked_at?: string;
+  active_deployments?: number;
+}
+
+export interface LicenseDeployment {
+  id: number;
+  license_id: number;
+  machine_fingerprint: string;
+  machine_label: string;
+  ip_address: string;
+  server_version: string;
+  first_seen: string;
+  last_heartbeat: string;
+  is_active: boolean;
+}
+
+export interface LicenseStatus {
+  server_mode: boolean;
+  status: {
+    mode: string;
+    plan?: string;
+    message: string;
+    grace_end?: string;
+    valid: boolean;
+    demo_mode?: boolean;
+    license_key?: string;
+  };
+}
+
+export async function getLicenses() {
+  return request<License[]>(`${API_BASE}/licenses`);
+}
+
+export async function createLicense(data: { plan: string; owner_email: string; owner_name: string; max_deployments?: number; notes?: string; expires_at?: string }) {
+  return request<License>(`${API_BASE}/licenses`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getLicense(id: number) {
+  return request<License>(`${API_BASE}/licenses/${id}`);
+}
+
+export async function updateLicense(id: number, data: Partial<{ plan: string; owner_email: string; owner_name: string; max_deployments: number; is_active: boolean; notes: string; expires_at: string }>) {
+  return request<License>(`${API_BASE}/licenses/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteLicense(id: number) {
+  return request<{ status: string }>(`${API_BASE}/licenses/${id}`, { method: 'DELETE' });
+}
+
+export async function getLicenseDeployments(licenseId: number) {
+  return request<LicenseDeployment[]>(`${API_BASE}/licenses/${licenseId}/deployments`);
+}
+
+export async function deactivateDeployment(licenseId: number, deploymentId: number) {
+  return request<{ status: string }>(`${API_BASE}/licenses/${licenseId}/deployments/${deploymentId}`, { method: 'DELETE' });
+}
+
+export async function getLicenseStatus() {
+  return request<LicenseStatus>(`${API_BASE}/license-status`);
+}
+
 // Auth
 export async function logout() {
   window.location.href = '/admin/logout';

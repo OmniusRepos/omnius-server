@@ -15,6 +15,7 @@
   import Curated from './routes/Curated.svelte';
   import ApiDocs from './routes/ApiDocs.svelte';
   import Settings from './routes/Settings.svelte';
+  import Licenses from './routes/Licenses.svelte';
 
   let isAuthenticated = false;
   let checkingAuth = true;
@@ -48,6 +49,7 @@
     '/tvshows/:id': TVShowDetail,
     '/channels': Channels,
     '/curated': Curated,
+    '/licenses': Licenses,
     '/api-docs': ApiDocs,
     '/settings': Settings,
   };

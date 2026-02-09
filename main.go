@@ -100,6 +100,37 @@ func main() {
 	// Initialize OMDB service
 	omdbService := services.NewOMDBService(cfg.OmdbAPIKey)
 
+	// --- License System ---
+	var licenseClient *services.LicenseClient
+	var licenseService *services.LicenseService
+	var licenseHandler *handlers.LicenseHandler
+
+	if cfg.LicenseServerMode {
+		// Authority mode: this IS the license server
+		licenseService = services.NewLicenseService(db)
+		licenseHandler = handlers.NewLicenseHandler(db, licenseService)
+		log.Println("[License] Running in LICENSE SERVER MODE (authority)")
+		// Start stale deployment cleanup
+		cleanupStop := make(chan struct{})
+		go licenseService.StartStaleCleanupLoop(cleanupStop)
+		defer close(cleanupStop)
+	}
+
+	if !cfg.LicenseServerMode {
+		// Client mode: phone home to validate license
+		fingerprint, err := services.GetMachineFingerprint()
+		if err != nil {
+			log.Printf("[License] Warning: failed to get machine fingerprint: %v", err)
+			fingerprint = "unknown"
+		}
+		licenseClient = services.NewLicenseClient(cfg.LicenseKey, cfg.LicenseServerURL, fingerprint, "1.0.0")
+		if err := licenseClient.Start(); err != nil {
+			log.Fatalf("[License] %v", err)
+		}
+		defer licenseClient.Stop()
+		log.Printf("[License] Status: %s", licenseClient.GetStatus().Message)
+	}
+
 	// Create subtitles directory
 	subtitlesDir := "data/subtitles"
 	if err := os.MkdirAll(subtitlesDir, 0755); err != nil {
@@ -149,6 +180,14 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(corsMiddleware)
 
+	// License enforcement middleware (client mode only)
+	if licenseClient != nil {
+		licenseMw := authMiddleware.NewLicenseMiddleware(licenseClient)
+		r.Use(licenseMw.EnforceValid)
+		demoLimiter := authMiddleware.NewDemoLimiter(licenseClient)
+		r.Use(demoLimiter.InjectDemoFlag)
+	}
+
 	// Health check
 	r.Get("/health", streamHandler.Health)
 
@@ -172,6 +211,16 @@ func main() {
 
 	// Initialize analytics handler
 	analyticsHandler := handlers.NewAnalyticsHandler(db, torrentService)
+
+	// License API endpoints (authority mode — public, called by customer binaries)
+	if cfg.LicenseServerMode && licenseHandler != nil {
+		r.Route("/api/v2/license", func(r chi.Router) {
+			r.Post("/validate", licenseHandler.Validate)
+			r.Post("/activate", licenseHandler.Activate)
+			r.Post("/heartbeat", licenseHandler.Heartbeat)
+			r.Post("/deactivate", licenseHandler.Deactivate)
+		})
+	}
 
 	// YTS-compatible API (public)
 	r.Route("/api/v2", func(r chi.Router) {
@@ -434,6 +483,36 @@ func main() {
 				})
 			})
 
+			// License admin API (authority mode)
+			if cfg.LicenseServerMode && licenseHandler != nil {
+				r.Get("/api/licenses", licenseHandler.AdminListLicenses)
+				r.Post("/api/licenses", licenseHandler.AdminCreateLicense)
+				r.Get("/api/licenses/{id}", licenseHandler.AdminGetLicense)
+				r.Put("/api/licenses/{id}", licenseHandler.AdminUpdateLicense)
+				r.Delete("/api/licenses/{id}", licenseHandler.AdminDeleteLicense)
+				r.Get("/api/licenses/{id}/deployments", licenseHandler.AdminGetDeployments)
+				r.Delete("/api/licenses/{id}/deployments/{did}", licenseHandler.AdminDeactivateDeployment)
+			}
+
+			// License status endpoint (all modes)
+			r.Get("/api/license-status", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				result := map[string]interface{}{
+					"server_mode": cfg.LicenseServerMode,
+				}
+				if licenseClient != nil {
+					status := licenseClient.GetStatus()
+					result["status"] = status
+				} else if cfg.LicenseServerMode {
+					result["status"] = map[string]interface{}{
+						"mode":    "authority",
+						"message": "Running as license authority server",
+						"valid":   true,
+					}
+				}
+				json.NewEncoder(w).Encode(result)
+			})
+
 			// YTS Mirror settings
 			r.Get("/api/settings/yts", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -539,6 +618,9 @@ func main() {
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 		log.Println("Shutting down...")
+		if licenseClient != nil {
+			licenseClient.Stop()
+		}
 		torrentService.Close()
 		db.Close()
 		os.Exit(0)

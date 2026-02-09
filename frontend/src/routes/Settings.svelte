@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getServices, updateServices, type ServiceConfig } from '../lib/api/client';
+  import { getServices, updateServices, getLicenseStatus, type ServiceConfig, type LicenseStatus } from '../lib/api/client';
 
   // Tab state
   let activeTab = $state('general');
@@ -23,14 +23,25 @@
   let savingServices = $state(false);
   let servicesMessage = $state<string | null>(null);
 
+  // License state
+  let licenseStatus: LicenseStatus | null = $state(null);
+
   // Sync state
   let refreshingMovies = $state(false);
   let refreshingShows = $state(false);
   let syncMessage = $state<string | null>(null);
 
   onMount(async () => {
-    await Promise.all([loadYTSSettings(), loadServices()]);
+    await Promise.all([loadYTSSettings(), loadServices(), loadLicenseStatus()]);
   });
+
+  async function loadLicenseStatus() {
+    try {
+      licenseStatus = await getLicenseStatus();
+    } catch (e) {
+      console.error('Failed to load license status:', e);
+    }
+  }
 
   async function loadServices() {
     try {
@@ -192,6 +203,9 @@
     </button>
     <button class="tab" class:active={activeTab === 'database'} onclick={() => activeTab = 'database'}>
       Database
+    </button>
+    <button class="tab" class:active={activeTab === 'license'} onclick={() => activeTab = 'license'}>
+      License
     </button>
   </div>
 
@@ -429,6 +443,72 @@
         <input type="text" id="omdb_api_key" class="form-input" placeholder="Enter OMDB API key" />
       </div>
       <p class="text-muted text-sm">Set via environment variable: OMDB_API_KEY</p>
+    </div>
+  {/if}
+
+  <!-- License Tab -->
+  {#if activeTab === 'license'}
+    <div class="card">
+      <h3>License Status</h3>
+      {#if licenseStatus}
+        <div class="license-info">
+          <div class="db-row">
+            <span class="db-label">Server Mode</span>
+            <span class="db-value">{licenseStatus.server_mode ? 'License Authority' : 'Client'}</span>
+          </div>
+          {#if licenseStatus.status}
+            <div class="db-row">
+              <span class="db-label">Mode</span>
+              <span class="db-value" style="color: {licenseStatus.status.mode === 'licensed' ? '#22c55e' : licenseStatus.status.mode === 'demo' ? '#f59e0b' : licenseStatus.status.mode === 'grace' ? '#f59e0b' : licenseStatus.status.mode === 'authority' ? '#3b82f6' : '#ef4444'}">
+                {licenseStatus.status.mode?.toUpperCase()}
+              </span>
+            </div>
+            <div class="db-row">
+              <span class="db-label">Message</span>
+              <span class="db-value">{licenseStatus.status.message}</span>
+            </div>
+            {#if licenseStatus.status.plan}
+              <div class="db-row">
+                <span class="db-label">Plan</span>
+                <span class="db-value">{licenseStatus.status.plan}</span>
+              </div>
+            {/if}
+            {#if licenseStatus.status.license_key}
+              <div class="db-row">
+                <span class="db-label">License Key</span>
+                <span class="db-value"><code>{licenseStatus.status.license_key}</code></span>
+              </div>
+            {/if}
+            {#if licenseStatus.status.grace_end}
+              <div class="db-row">
+                <span class="db-label">Grace Until</span>
+                <span class="db-value" style="color: #f59e0b">{new Date(licenseStatus.status.grace_end).toLocaleDateString()}</span>
+              </div>
+            {/if}
+          {/if}
+        </div>
+      {:else}
+        <p class="text-muted">Loading license status...</p>
+      {/if}
+    </div>
+
+    <div class="card mt-4">
+      <h3>Configuration</h3>
+      <p class="text-muted mb-4">License settings are configured via environment variables:</p>
+      <div class="db-info">
+        <div class="db-row">
+          <span class="db-label">LICENSE_KEY</span>
+          <span class="db-value">Your license key (empty = demo mode)</span>
+        </div>
+        <div class="db-row">
+          <span class="db-label">LICENSE_SERVER_URL</span>
+          <span class="db-value">Phone-home target (default: https://api.omnius.lol)</span>
+        </div>
+        <div class="db-row">
+          <span class="db-label">LICENSE_SERVER_MODE</span>
+          <span class="db-value">Set to "true" to run as license authority</span>
+        </div>
+      </div>
     </div>
   {/if}
 
