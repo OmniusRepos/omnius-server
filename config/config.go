@@ -23,7 +23,7 @@ func Load() *Config {
 		DownloadDir:       getEnv("DOWNLOAD_DIR", "./data/downloads"),
 		OmdbAPIKey:        getEnv("OMDB_API_KEY", ""),
 		LicenseKey:        getEnv("LICENSE_KEY", ""),
-		LicenseServerURL:  getEnv("LICENSE_SERVER_URL", "https://api.omnius.lol"),
+		LicenseServerURL:  getEnv("LICENSE_SERVER_URL", "https://license.omnius.lol"),
 		LicenseServerMode: getEnv("LICENSE_SERVER_MODE", "false") == "true",
 	}
 }

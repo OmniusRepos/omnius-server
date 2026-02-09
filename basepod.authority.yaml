@@ -1,0 +1,12 @@
+name: omnius-license
+server: bp.common.al
+port: 8080
+domains:
+  - license.omnius.lol
+build:
+    dockerfile: Dockerfile
+    context: .
+env:
+  LICENSE_SERVER_MODE: "true"
+volumes:
+  - omnius-license-data:/app/data

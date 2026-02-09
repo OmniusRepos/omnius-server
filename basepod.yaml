@@ -7,6 +7,6 @@ build:
     dockerfile: Dockerfile
     context: .
 env:
-  LICENSE_SERVER_MODE: "true"
+  LICENSE_SERVER_URL: "https://license.omnius.lol"
 volumes:
   - omnius-data:/app/data
