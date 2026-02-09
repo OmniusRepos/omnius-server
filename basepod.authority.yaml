@@ -9,4 +9,4 @@ build:
 env:
   LICENSE_SERVER_MODE: "true"
 volumes:
-  - omnius-license-data:/app/data
+  - license-data:/app/data
