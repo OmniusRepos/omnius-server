@@ -54,6 +54,28 @@ func (s *SyncService) SyncMovie(imdbCode string) (*models.Movie, error) {
 		return nil, fmt.Errorf("failed to fetch from IMDB: %w", err)
 	}
 
+	// For borderline types (tvSpecial, etc.), check provider availability
+	// to decide whether to treat as movie or series
+	if richData.IMDBType == "tvSpecial" {
+		log.Printf("[SyncMovie] %s is a tvSpecial (%s), checking providers...", imdbCode, richData.Title)
+
+		// Check if YTS has it (movie torrents)
+		yts := providers.NewYTSProvider()
+		ytsResults, _ := yts.SearchMovie(richData.Title, richData.Year)
+		if len(ytsResults) > 0 {
+			log.Printf("[SyncMovie] %s found on YTS (%d results), adding as movie", imdbCode, len(ytsResults))
+		} else {
+			// Not on YTS — check EZTV (series torrents)
+			imdbID := strings.TrimPrefix(imdbCode, "tt")
+			eztvResults, _ := providers.FetchEZTVTorrents(imdbID)
+			if len(eztvResults) > 0 {
+				log.Printf("[SyncMovie] %s not on YTS but found on EZTV (%d results), skipping movie — add as series instead", imdbCode, len(eztvResults))
+				return nil, fmt.Errorf("tvSpecial %s has torrents on EZTV, add as series instead", imdbCode)
+			}
+			log.Printf("[SyncMovie] %s not found on YTS or EZTV, adding as movie anyway", imdbCode)
+		}
+	}
+
 	movie := richData.ToMovie(imdbCode)
 	// Set additional data from rich response
 	if len(richData.Directors) > 0 {

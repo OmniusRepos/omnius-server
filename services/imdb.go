@@ -135,6 +135,7 @@ type RichMovieData struct {
 	VoteCount         int
 	Metacritic        int
 	ContentRating     string
+	IMDBType          string // Original IMDB type (movie, tvMovie, tvSpecial, etc.)
 	PosterURL         string
 	BackgroundURL     string
 	Directors         []string
@@ -251,12 +252,14 @@ func (s *IMDBService) FetchRichData(imdbID string) (*RichMovieData, error) {
 		return nil, fmt.Errorf("failed to fetch title: %w", err)
 	}
 
-	// Accept movies, TV movies, and shorts - reject TV series
-	validTypes := map[string]bool{"movie": true, "tvMovie": true, "short": true, "video": true}
+	// Accept movies, TV movies, shorts, and TV specials (standup specials etc.)
+	// tvSpecials are standalone single-episode content, treated as movies for torrent search
+	validTypes := map[string]bool{"movie": true, "tvMovie": true, "short": true, "video": true, "tvSpecial": true}
 	if !validTypes[title.Type] {
 		return nil, fmt.Errorf("not a movie: %s is a %s", imdbID, title.Type)
 	}
 
+	data.IMDBType = title.Type
 	data.Title = title.PrimaryTitle
 	data.OriginalTitle = title.OriginalTitle
 	data.Year = title.StartYear
