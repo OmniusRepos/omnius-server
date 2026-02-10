@@ -75,6 +75,7 @@ type LicenseActivateRequest struct {
 	MachineFingerprint string `json:"machine_fingerprint"`
 	MachineLabel       string `json:"machine_label"`
 	ServerVersion      string `json:"server_version"`
+	Domain             string `json:"domain,omitempty"`
 }
 
 // LicenseHeartbeatRequest is sent periodically by customer binary
@@ -82,6 +83,7 @@ type LicenseHeartbeatRequest struct {
 	LicenseKey         string `json:"license_key"`
 	MachineFingerprint string `json:"machine_fingerprint"`
 	ServerVersion      string `json:"server_version"`
+	Domain             string `json:"domain,omitempty"`
 }
 
 // LicenseDeactivateRequest is sent on clean shutdown

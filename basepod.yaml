@@ -9,5 +9,6 @@ build:
 env:
   LICENSE_SERVER_MODE: "false"
   LICENSE_SERVER_URL: "https://license.omnius.lol"
+  SERVER_DOMAIN: "api.omnius.lol"
 volumes:
   - omnius-data:/app/data

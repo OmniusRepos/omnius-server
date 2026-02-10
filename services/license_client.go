@@ -26,6 +26,7 @@ type LicenseClient struct {
 	serverURL     string
 	fingerprint   string
 	serverVersion string
+	domain        string
 	httpClient    *http.Client
 
 	mu     sync.RWMutex
@@ -46,12 +47,13 @@ type LicenseStatus struct {
 	LicenseKey string `json:"license_key"` // masked key for display
 }
 
-func NewLicenseClient(licenseKey, serverURL, fingerprint, version string) *LicenseClient {
+func NewLicenseClient(licenseKey, serverURL, fingerprint, version, domain string) *LicenseClient {
 	return &LicenseClient{
 		licenseKey:    licenseKey,
 		serverURL:     serverURL,
 		fingerprint:   fingerprint,
 		serverVersion: version,
+		domain:        domain,
 		httpClient:    &http.Client{Timeout: 15 * time.Second},
 		stopCh:        make(chan struct{}),
 	}
@@ -217,6 +219,7 @@ func (c *LicenseClient) activate() (*models.LicenseResponse, error) {
 		MachineFingerprint: c.fingerprint,
 		MachineLabel:       hostname,
 		ServerVersion:      c.serverVersion,
+		Domain:             c.domain,
 	}
 	body, _ := json.Marshal(req)
 	resp, err := c.httpClient.Post(c.serverURL+"/api/v2/license/activate", "application/json", bytes.NewReader(body))
@@ -297,6 +300,7 @@ func (c *LicenseClient) sendHeartbeat() {
 		LicenseKey:         c.licenseKey,
 		MachineFingerprint: c.fingerprint,
 		ServerVersion:      c.serverVersion,
+		Domain:             c.domain,
 	}
 	body, _ := json.Marshal(req)
 	resp, err := c.httpClient.Post(c.serverURL+"/api/v2/license/heartbeat", "application/json", bytes.NewReader(body))

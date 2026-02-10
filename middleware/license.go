@@ -65,8 +65,9 @@ func NewDemoLimiter(client *services.LicenseClient) *DemoLimiter {
 	return &DemoLimiter{client: client}
 }
 
-// InjectDemoFlag adds "demo": true to JSON responses when in demo mode.
-// It also blocks channel endpoints in demo mode.
+// InjectDemoFlag blocks all public JSON API endpoints in demo mode.
+// Without a license, only the admin panel is accessible.
+// With a valid license, all JSON APIs are enabled.
 func (dl *DemoLimiter) InjectDemoFlag(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !dl.client.IsDemo() {
@@ -74,18 +75,39 @@ func (dl *DemoLimiter) InjectDemoFlag(next http.Handler) http.Handler {
 			return
 		}
 
-		// Block channel endpoints in demo mode
-		if strings.Contains(r.URL.Path, "channel") {
+		path := r.URL.Path
+
+		// Allow admin routes (panel + admin API)
+		if strings.HasPrefix(path, "/admin") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Allow health check
+		if path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Allow license endpoints
+		if strings.HasPrefix(path, "/api/v2/license/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Block all other /api/ endpoints — requires a license
+		if strings.HasPrefix(path, "/api/") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":         "error",
-				"status_message": "Channels are not available in demo mode",
+				"status_message": "JSON APIs require a valid license. Purchase at https://omnius.stream/pricing",
 				"demo":           true,
 			})
 			return
 		}
 
+		// Allow static files, templates, etc.
 		next.ServeHTTP(w, r)
 	})
 }

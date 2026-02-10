@@ -13,6 +13,19 @@ type Config struct {
 	LicenseKey        string
 	LicenseServerURL  string
 	LicenseServerMode bool
+	ServerDomain      string
+
+	// Paddle
+	PaddleWebhookSecret  string
+	PaddlePersonalPriceID string
+	PaddleBusinessPriceID string
+
+	// SMTP (optional)
+	SMTPHost string
+	SMTPPort string
+	SMTPUser string
+	SMTPPass string
+	SMTPFrom string
 }
 
 func Load() *Config {
@@ -25,6 +38,17 @@ func Load() *Config {
 		LicenseKey:        getEnv("LICENSE_KEY", ""),
 		LicenseServerURL:  getEnv("LICENSE_SERVER_URL", "https://license.omnius.lol"),
 		LicenseServerMode: getEnv("LICENSE_SERVER_MODE", "false") == "true",
+		ServerDomain:      getEnv("SERVER_DOMAIN", ""),
+
+		PaddleWebhookSecret:   getEnv("PADDLE_WEBHOOK_SECRET", ""),
+		PaddlePersonalPriceID: getEnv("PADDLE_PERSONAL_PRICE_ID", ""),
+		PaddleBusinessPriceID: getEnv("PADDLE_BUSINESS_PRICE_ID", ""),
+
+		SMTPHost: getEnv("SMTP_HOST", ""),
+		SMTPPort: getEnv("SMTP_PORT", "587"),
+		SMTPUser: getEnv("SMTP_USER", ""),
+		SMTPPass: getEnv("SMTP_PASS", ""),
+		SMTPFrom: getEnv("SMTP_FROM", ""),
 	}
 }
 

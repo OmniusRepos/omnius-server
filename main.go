@@ -104,6 +104,7 @@ func main() {
 	var licenseClient *services.LicenseClient
 	var licenseService *services.LicenseService
 	var licenseHandler *handlers.LicenseHandler
+	var paddleHandler *handlers.PaddleHandler
 
 	if cfg.LicenseServerMode {
 		// Authority mode: this IS the license server
@@ -114,6 +115,13 @@ func main() {
 		cleanupStop := make(chan struct{})
 		go licenseService.StartStaleCleanupLoop(cleanupStop)
 		defer close(cleanupStop)
+
+		// Initialize Paddle webhook handler
+		emailSvc := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
+		paddleHandler = handlers.NewPaddleHandler(db, licenseService, cfg, emailSvc)
+		if cfg.PaddleWebhookSecret != "" {
+			log.Println("[Paddle] Webhook handler initialized")
+		}
 	}
 
 	if !cfg.LicenseServerMode {
@@ -123,7 +131,7 @@ func main() {
 			log.Printf("[License] Warning: failed to get machine fingerprint: %v", err)
 			fingerprint = "unknown"
 		}
-		licenseClient = services.NewLicenseClient(cfg.LicenseKey, cfg.LicenseServerURL, fingerprint, "1.0.0")
+		licenseClient = services.NewLicenseClient(cfg.LicenseKey, cfg.LicenseServerURL, fingerprint, "1.0.0", cfg.ServerDomain)
 		if err := licenseClient.Start(); err != nil {
 			log.Fatalf("[License] %v", err)
 		}
@@ -219,7 +227,11 @@ func main() {
 			r.Post("/activate", licenseHandler.Activate)
 			r.Post("/heartbeat", licenseHandler.Heartbeat)
 			r.Post("/deactivate", licenseHandler.Deactivate)
+			r.Get("/lookup", paddleHandler.LicenseLookup)
 		})
+
+		// Paddle webhook (public, signature-verified)
+		r.Post("/api/v2/paddle/webhook", paddleHandler.HandleWebhook)
 	}
 
 	// YTS-compatible API (public)

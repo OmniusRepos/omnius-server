@@ -1,0 +1,13 @@
+name: demo-omnius
+server: bp.common.al
+port: 8080
+domains:
+  - demo.omnius.lol
+build:
+  dockerfile: Dockerfile
+  context: .
+env:
+  LICENSE_SERVER_MODE: "false"
+  ADMIN_PASSWORD: "demo"
+volumes:
+  - demo-omnius-data:/app/data

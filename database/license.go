@@ -132,6 +132,50 @@ func (d *DB) UpdateLicense(id int64, req *models.AdminUpdateLicenseRequest) erro
 	return nil
 }
 
+// GetLicenseByPaddleTransaction finds a license by Paddle transaction ID in the notes field (for idempotency)
+func (d *DB) GetLicenseByPaddleTransaction(txnID string) (*models.License, error) {
+	l := &models.License{}
+	var expiresAt, revokedAt sql.NullTime
+	var isActive int
+	err := d.QueryRow(`
+		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, created_at, expires_at, revoked_at
+		FROM licenses WHERE notes LIKE ?`, "%Paddle transaction: "+txnID+"%",
+	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &l.CreatedAt, &expiresAt, &revokedAt)
+	if err != nil {
+		return nil, err
+	}
+	l.IsActive = isActive == 1
+	if expiresAt.Valid {
+		l.ExpiresAt = &expiresAt.Time
+	}
+	if revokedAt.Valid {
+		l.RevokedAt = &revokedAt.Time
+	}
+	return l, nil
+}
+
+// GetLicenseByEmail returns the most recent active license for a given email
+func (d *DB) GetLicenseByEmail(email string) (*models.License, error) {
+	l := &models.License{}
+	var expiresAt, revokedAt sql.NullTime
+	var isActive int
+	err := d.QueryRow(`
+		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, created_at, expires_at, revoked_at
+		FROM licenses WHERE owner_email = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1`, email,
+	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &l.CreatedAt, &expiresAt, &revokedAt)
+	if err != nil {
+		return nil, err
+	}
+	l.IsActive = isActive == 1
+	if expiresAt.Valid {
+		l.ExpiresAt = &expiresAt.Time
+	}
+	if revokedAt.Valid {
+		l.RevokedAt = &revokedAt.Time
+	}
+	return l, nil
+}
+
 func (d *DB) DeleteLicense(id int64) error {
 	_, err := d.Exec("DELETE FROM licenses WHERE id = ?", id)
 	return err
