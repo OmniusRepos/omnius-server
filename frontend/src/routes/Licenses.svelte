@@ -1,35 +1,43 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import {
-    getLicenses, createLicense, updateLicense, deleteLicense,
-    getLicenseDeployments, deactivateDeployment,
-    type License, type LicenseDeployment,
-  } from '../lib/api/client';
 
-  let licenses: License[] = $state([]);
+  interface LicenseStatus {
+    mode: string;
+    plan: string;
+    message: string;
+    grace_end?: string;
+    valid: boolean;
+    demo_mode: boolean;
+    license_key: string;
+  }
+
+  interface LicenseInfo {
+    status: LicenseStatus;
+    fingerprint: string;
+    hostname: string;
+    domain: string;
+    server_url: string;
+  }
+
+  const API_BASE = '/admin/api';
+
+  let info: LicenseInfo | null = $state(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
 
-  // Create form
-  let showCreate = $state(false);
-  let createForm = $state({ plan: 'personal', owner_email: '', owner_name: '', max_deployments: 1, notes: '' });
-  let creating = $state(false);
+  let keyInput = $state('');
+  let activating = $state(false);
 
-  // Detail view
-  let selectedLicense: License | null = $state(null);
-  let deployments: LicenseDeployment[] = $state([]);
-  let loadingDeps = $state(false);
+  onMount(() => { loadStatus(); });
 
-  // Copied key feedback
-  let copiedId: number | null = $state(null);
-
-  onMount(() => { loadLicenses(); });
-
-  async function loadLicenses() {
+  async function loadStatus() {
     loading = true;
     error = null;
     try {
-      licenses = await getLicenses();
+      const res = await fetch(`${API_BASE}/license-status`, {
+        headers: { 'Accept': 'application/json' },
+      });
+      info = await res.json();
     } catch (e) {
       error = String(e);
     } finally {
@@ -37,68 +45,40 @@
     }
   }
 
-  async function handleCreate() {
-    creating = true;
+  async function handleActivate() {
+    if (!keyInput.trim()) return;
+    activating = true;
+    error = null;
     try {
-      const maxDep = createForm.plan === 'personal' ? 1 : createForm.plan === 'business' ? 5 : createForm.max_deployments;
-      await createLicense({ ...createForm, max_deployments: maxDep });
-      showCreate = false;
-      createForm = { plan: 'personal', owner_email: '', owner_name: '', max_deployments: 1, notes: '' };
-      await loadLicenses();
+      const res = await fetch(`${API_BASE}/license-activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ license_key: keyInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        error = data.error || 'Activation failed';
+        if (data.status) {
+          info = { ...info!, status: data.status };
+        }
+      } else {
+        info = data;
+        keyInput = '';
+      }
     } catch (e) {
       error = String(e);
     } finally {
-      creating = false;
+      activating = false;
     }
   }
 
-  async function toggleActive(l: License) {
-    try {
-      await updateLicense(l.id, { is_active: !l.is_active });
-      await loadLicenses();
-    } catch (e) {
-      error = String(e);
+  function modeColor(mode: string): string {
+    switch (mode) {
+      case 'licensed': return '#22c55e';
+      case 'grace': return '#f59e0b';
+      case 'demo': return '#3b82f6';
+      default: return '#ef4444';
     }
-  }
-
-  async function handleDelete(l: License) {
-    if (!confirm(`Delete license for ${l.owner_name || l.owner_email}? This cannot be undone.`)) return;
-    try {
-      await deleteLicense(l.id);
-      if (selectedLicense?.id === l.id) selectedLicense = null;
-      await loadLicenses();
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  async function viewDeployments(l: License) {
-    selectedLicense = l;
-    loadingDeps = true;
-    try {
-      deployments = await getLicenseDeployments(l.id);
-    } catch (e) {
-      error = String(e);
-    } finally {
-      loadingDeps = false;
-    }
-  }
-
-  async function handleDeactivateDep(dep: LicenseDeployment) {
-    if (!selectedLicense) return;
-    try {
-      await deactivateDeployment(selectedLicense.id, dep.id);
-      deployments = await getLicenseDeployments(selectedLicense.id);
-      await loadLicenses();
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  function copyKey(key: string, id: number) {
-    navigator.clipboard.writeText(key);
-    copiedId = id;
-    setTimeout(() => { copiedId = null; }, 2000);
   }
 
   function planColor(plan: string): string {
@@ -109,196 +89,115 @@
       default: return '#6b7280';
     }
   }
-
-  function timeAgo(dateStr: string): string {
-    const d = new Date(dateStr);
-    const now = new Date();
-    const diff = now.getTime() - d.getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    return `${days}d ago`;
-  }
 </script>
 
-<div class="licenses-page">
+<div class="license-page">
   <header class="page-header">
-    <h1 class="page-title">LICENSES</h1>
-    <button class="btn btn-primary" onclick={() => showCreate = !showCreate}>
-      {showCreate ? 'Cancel' : '+ New License'}
-    </button>
+    <h1 class="page-title">LICENSE</h1>
   </header>
 
   {#if error}
     <div class="error-banner">{error}</div>
   {/if}
 
-  <!-- Create Form -->
-  {#if showCreate}
-    <div class="card mb-4">
-      <h3>Create License</h3>
-      <div class="form-grid">
-        <div class="form-group">
-          <label class="form-label" for="plan">Plan</label>
-          <select id="plan" class="form-input" bind:value={createForm.plan}>
-            <option value="personal">Personal (1 deployment)</option>
-            <option value="business">Business (5 deployments)</option>
-            <option value="enterprise">Enterprise (custom)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="owner_name">Owner Name</label>
-          <input id="owner_name" class="form-input" bind:value={createForm.owner_name} placeholder="John Doe" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="owner_email">Owner Email</label>
-          <input id="owner_email" type="email" class="form-input" bind:value={createForm.owner_email} placeholder="john@example.com" />
-        </div>
-        {#if createForm.plan === 'enterprise'}
-          <div class="form-group">
-            <label class="form-label" for="max_dep">Max Deployments</label>
-            <input id="max_dep" type="number" class="form-input" bind:value={createForm.max_deployments} min="1" />
-          </div>
-        {/if}
-        <div class="form-group full-width">
-          <label class="form-label" for="notes">Notes</label>
-          <input id="notes" class="form-input" bind:value={createForm.notes} placeholder="Optional notes..." />
-        </div>
-      </div>
-      <button class="btn btn-primary mt-4" onclick={handleCreate} disabled={creating || !createForm.owner_email}>
-        {creating ? 'Creating...' : 'Generate License Key'}
-      </button>
-    </div>
-  {/if}
-
-  <!-- License List -->
   {#if loading}
-    <div class="loading-state">Loading licenses...</div>
-  {:else if licenses.length === 0}
-    <div class="empty-state">
-      <p>No licenses yet. Create one to get started.</p>
-    </div>
-  {:else}
-    <div class="licenses-grid">
-      {#each licenses as l}
-        <div class="license-card" class:revoked={!l.is_active}>
-          <div class="license-header">
-            <span class="plan-badge" style="background: {planColor(l.plan)}">{l.plan.toUpperCase()}</span>
-            <div class="license-actions">
-              <button class="btn-icon" title={l.is_active ? 'Revoke' : 'Reactivate'} onclick={() => toggleActive(l)}>
-                {l.is_active ? '🔒' : '🔓'}
-              </button>
-              <button class="btn-icon danger" title="Delete" onclick={() => handleDelete(l)}>
-                🗑
-              </button>
-            </div>
-          </div>
-
-          <div class="license-key-row">
-            <code class="license-key">{l.license_key}</code>
-            <button class="btn-copy" onclick={() => copyKey(l.license_key, l.id)}>
-              {copiedId === l.id ? 'Copied!' : 'Copy'}
-            </button>
-          </div>
-
-          <div class="license-details">
-            <div class="detail-row">
-              <span class="detail-label">Owner</span>
-              <span class="detail-value">{l.owner_name || 'N/A'}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Email</span>
-              <span class="detail-value">{l.owner_email || 'N/A'}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Deployments</span>
-              <span class="detail-value">{l.active_deployments || 0} / {l.max_deployments}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Status</span>
-              <span class="detail-value" class:text-green={l.is_active} class:text-red={!l.is_active}>
-                {l.is_active ? 'Active' : 'Revoked'}
-              </span>
-            </div>
-            {#if l.expires_at}
-              <div class="detail-row">
-                <span class="detail-label">Expires</span>
-                <span class="detail-value">{new Date(l.expires_at).toLocaleDateString()}</span>
-              </div>
-            {/if}
-          </div>
-
-          <button class="btn btn-secondary btn-sm mt-3" onclick={() => viewDeployments(l)}>
-            View Deployments
-          </button>
-        </div>
-      {/each}
-    </div>
-  {/if}
-
-  <!-- Deployments Panel -->
-  {#if selectedLicense}
-    <div class="deployments-panel">
-      <div class="panel-header">
-        <h3>Deployments for {selectedLicense.license_key}</h3>
-        <button class="btn-close" onclick={() => selectedLicense = null}>Close</button>
+    <div class="loading-state">Loading license status...</div>
+  {:else if info}
+    <!-- Current Status -->
+    <div class="status-card">
+      <div class="status-header">
+        <span class="mode-badge" style="background: {modeColor(info.status.mode)}">
+          {info.status.mode.toUpperCase()}
+        </span>
+        {#if info.status.plan}
+          <span class="plan-badge" style="background: {planColor(info.status.plan)}">
+            {info.status.plan.toUpperCase()}
+          </span>
+        {/if}
+        <span class="valid-indicator" class:valid={info.status.valid} class:invalid={!info.status.valid}>
+          {info.status.valid ? 'Valid' : 'Invalid'}
+        </span>
       </div>
 
-      {#if loadingDeps}
-        <p class="text-muted">Loading deployments...</p>
-      {:else if deployments.length === 0}
-        <p class="text-muted">No deployments registered.</p>
-      {:else}
-        <table class="dep-table">
-          <thead>
-            <tr>
-              <th>Machine</th>
-              <th>IP</th>
-              <th>Version</th>
-              <th>Last Heartbeat</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each deployments as dep}
-              <tr class:inactive={!dep.is_active}>
-                <td>
-                  <div class="machine-info">
-                    <span class="machine-label">{dep.machine_label || 'Unknown'}</span>
-                    <span class="fingerprint">{dep.machine_fingerprint.slice(0, 12)}...</span>
-                  </div>
-                </td>
-                <td><code>{dep.ip_address}</code></td>
-                <td>{dep.server_version}</td>
-                <td>{timeAgo(dep.last_heartbeat)}</td>
-                <td>
-                  <span class="status-dot" class:active={dep.is_active} class:stale={!dep.is_active}></span>
-                  {dep.is_active ? 'Active' : 'Inactive'}
-                </td>
-                <td>
-                  {#if dep.is_active}
-                    <button class="btn btn-danger btn-sm" onclick={() => handleDeactivateDep(dep)}>
-                      Deactivate
-                    </button>
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+      <p class="status-message">{info.status.message}</p>
+
+      {#if info.status.license_key}
+        <div class="detail-grid">
+          <div class="detail-item">
+            <span class="detail-label">License Key</span>
+            <code class="detail-value key">{info.status.license_key}</code>
+          </div>
+          {#if info.status.plan}
+            <div class="detail-item">
+              <span class="detail-label">Plan</span>
+              <span class="detail-value">{info.status.plan}</span>
+            </div>
+          {/if}
+        </div>
       {/if}
+
+      {#if info.status.grace_end}
+        <div class="grace-warning">
+          Grace period expires: {new Date(info.status.grace_end).toLocaleDateString()}
+        </div>
+      {/if}
+    </div>
+
+    <!-- Server Info -->
+    <div class="info-card">
+      <h3>Deployment Info</h3>
+      <div class="detail-grid">
+        <div class="detail-item">
+          <span class="detail-label">Domain</span>
+          <span class="detail-value">{info.domain || window.location.hostname}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Hostname</span>
+          <span class="detail-value">{info.hostname}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Machine Fingerprint</span>
+          <code class="detail-value fingerprint">{info.fingerprint?.slice(0, 16)}...</code>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">License Authority</span>
+          <span class="detail-value">{info.server_url}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activate License -->
+    <div class="activate-card">
+      <h3>{info.status.license_key ? 'Change License Key' : 'Activate License'}</h3>
+      <p class="activate-hint">
+        {info.status.demo_mode
+          ? 'Enter a license key to activate this server. Purchase one at omnius.stream.'
+          : 'Enter a new license key to replace the current one.'}
+      </p>
+      <div class="activate-form">
+        <input
+          type="text"
+          class="key-input"
+          bind:value={keyInput}
+          placeholder="OMNI-XXXX-XXXX-XXXX-XXXX"
+          spellcheck="false"
+          autocomplete="off"
+          onkeydown={(e) => { if (e.key === 'Enter') handleActivate(); }}
+        />
+        <button
+          class="btn btn-primary"
+          onclick={handleActivate}
+          disabled={activating || !keyInput.trim()}
+        >
+          {activating ? 'Activating...' : 'Activate'}
+        </button>
+      </div>
     </div>
   {/if}
 </div>
 
 <style>
   .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
     margin-bottom: 24px;
   }
 
@@ -311,42 +210,28 @@
     margin-bottom: 16px;
   }
 
-  .form-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
+  .loading-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted, #888);
   }
 
-  .full-width {
-    grid-column: 1 / -1;
-  }
-
-  .licenses-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-    gap: 16px;
-  }
-
-  .license-card {
+  .status-card, .info-card, .activate-card {
     background: var(--bg-secondary, #0d1117);
     border: 1px solid var(--border-color, #333);
     border-radius: 12px;
-    padding: 20px;
-    transition: opacity 0.2s;
+    padding: 24px;
+    margin-bottom: 16px;
   }
 
-  .license-card.revoked {
-    opacity: 0.6;
-  }
-
-  .license-header {
+  .status-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 10px;
     margin-bottom: 12px;
   }
 
-  .plan-badge {
+  .mode-badge, .plan-badge {
     padding: 4px 10px;
     border-radius: 4px;
     font-size: 11px;
@@ -355,176 +240,105 @@
     letter-spacing: 0.5px;
   }
 
-  .license-actions {
-    display: flex;
-    gap: 4px;
-  }
-
-  .btn-icon {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 16px;
-    padding: 4px 8px;
-    border-radius: 4px;
-    opacity: 0.6;
-  }
-
-  .btn-icon:hover {
-    opacity: 1;
-    background: var(--bg-tertiary, #1a1a2e);
-  }
-
-  .btn-icon.danger:hover {
-    background: rgba(239, 68, 68, 0.2);
-  }
-
-  .license-key-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 16px;
-    padding: 10px;
-    background: var(--bg-tertiary, #1a1a2e);
-    border-radius: 6px;
-  }
-
-  .license-key {
-    flex: 1;
+  .valid-indicator {
+    margin-left: auto;
     font-size: 13px;
-    color: var(--accent, #6366f1);
     font-weight: 600;
-    letter-spacing: 0.5px;
   }
+  .valid-indicator.valid { color: #22c55e; }
+  .valid-indicator.invalid { color: #ef4444; }
 
-  .btn-copy {
-    background: var(--bg-secondary, #0d1117);
-    border: 1px solid var(--border-color, #333);
+  .status-message {
     color: var(--text-secondary, #999);
-    padding: 4px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
+    font-size: 14px;
+    margin-bottom: 16px;
   }
 
-  .btn-copy:hover {
-    color: var(--text-primary, #fff);
-    border-color: var(--accent, #6366f1);
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
   }
 
-  .license-details {
+  .detail-item {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-  }
-
-  .detail-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 13px;
+    gap: 4px;
   }
 
   .detail-label {
     color: var(--text-muted, #888);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
   }
 
   .detail-value {
+    font-size: 14px;
     font-weight: 500;
   }
 
-  .text-green { color: #22c55e; }
-  .text-red { color: #ef4444; }
-
-  /* Deployments panel */
-  .deployments-panel {
-    margin-top: 24px;
-    background: var(--bg-secondary, #0d1117);
-    border: 1px solid var(--border-color, #333);
-    border-radius: 12px;
-    padding: 20px;
+  .detail-value.key {
+    color: var(--accent, #6366f1);
+    font-size: 15px;
+    letter-spacing: 0.5px;
   }
 
-  .panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+  .detail-value.fingerprint {
+    font-size: 12px;
+    color: var(--text-muted, #888);
+  }
+
+  .grace-warning {
+    margin-top: 12px;
+    padding: 10px;
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  .info-card h3, .activate-card h3 {
+    margin-bottom: 16px;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary, #999);
+  }
+
+  .activate-hint {
+    color: var(--text-muted, #888);
+    font-size: 13px;
     margin-bottom: 16px;
   }
 
-  .btn-close {
-    background: none;
-    border: 1px solid var(--border-color, #333);
-    color: var(--text-secondary, #999);
-    padding: 6px 14px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .dep-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  .dep-table th {
-    text-align: left;
-    padding: 10px 12px;
-    color: var(--text-muted, #888);
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 1px solid var(--border-color, #333);
-  }
-
-  .dep-table td {
-    padding: 10px 12px;
-    font-size: 13px;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-  }
-
-  .dep-table tr.inactive {
-    opacity: 0.5;
-  }
-
-  .machine-info {
+  .activate-form {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    gap: 12px;
   }
 
-  .machine-label {
-    font-weight: 600;
-  }
-
-  .fingerprint {
-    font-size: 11px;
-    color: var(--text-muted, #888);
+  .key-input {
+    flex: 1;
+    padding: 12px 16px;
+    background: var(--bg-tertiary, #1a1a2e);
+    border: 1px solid var(--border-color, #333);
+    border-radius: 8px;
+    color: var(--text-primary, #fff);
     font-family: monospace;
+    font-size: 15px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
   }
 
-  .status-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-right: 6px;
+  .key-input::placeholder {
+    color: var(--text-muted, #555);
+    text-transform: uppercase;
   }
 
-  .status-dot.active { background: #22c55e; }
-  .status-dot.stale { background: #6b7280; }
-
-  .loading-state, .empty-state {
-    text-align: center;
-    padding: 40px;
-    color: var(--text-muted, #888);
-  }
-
-  .mt-3 { margin-top: 12px; }
-  .mb-4 { margin-bottom: 16px; }
-  .mt-4 { margin-top: 16px; }
-
-  .btn-sm {
-    padding: 6px 14px;
-    font-size: 13px;
+  .key-input:focus {
+    outline: none;
+    border-color: var(--accent, #6366f1);
   }
 </style>

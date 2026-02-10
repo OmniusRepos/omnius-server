@@ -175,6 +175,39 @@ func (c *LicenseClient) Stop() {
 	log.Println("[License] Deployment deactivated")
 }
 
+// Restart stops the current heartbeat, sets a new license key, and re-activates.
+func (c *LicenseClient) Restart(newKey string) error {
+	// Stop current heartbeat loop
+	select {
+	case <-c.stopCh:
+		// Already closed
+	default:
+		close(c.stopCh)
+	}
+
+	c.mu.Lock()
+	c.licenseKey = newKey
+	c.stopCh = make(chan struct{})
+	c.mu.Unlock()
+
+	// Persist the new key so it survives restarts
+	os.WriteFile("data/.license-key", []byte(newKey), 0600)
+
+	return c.Start()
+}
+
+// GetKey returns the current (unmasked) license key.
+func (c *LicenseClient) GetKey() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.licenseKey
+}
+
+// GetFingerprint returns this machine's fingerprint.
+func (c *LicenseClient) GetFingerprint() string {
+	return c.fingerprint
+}
+
 // GetStatus returns the current license status
 func (c *LicenseClient) GetStatus() LicenseStatus {
 	c.mu.RLock()

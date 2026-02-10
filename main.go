@@ -101,43 +101,25 @@ func main() {
 	omdbService := services.NewOMDBService(cfg.OmdbAPIKey)
 
 	// --- License System ---
-	var licenseClient *services.LicenseClient
-	var licenseService *services.LicenseService
-	var licenseHandler *handlers.LicenseHandler
-	var paddleHandler *handlers.PaddleHandler
-
-	if cfg.LicenseServerMode {
-		// Authority mode: this IS the license server
-		licenseService = services.NewLicenseService(db)
-		licenseHandler = handlers.NewLicenseHandler(db, licenseService)
-		log.Println("[License] Running in LICENSE SERVER MODE (authority)")
-		// Start stale deployment cleanup
-		cleanupStop := make(chan struct{})
-		go licenseService.StartStaleCleanupLoop(cleanupStop)
-		defer close(cleanupStop)
-
-		// Initialize Paddle webhook handler
-		emailSvc := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
-		paddleHandler = handlers.NewPaddleHandler(db, licenseService, cfg, emailSvc)
-		if cfg.PaddleWebhookSecret != "" {
-			log.Println("[Paddle] Webhook handler initialized")
+	// Always runs as client — omnius.stream is the sole license authority
+	fingerprint, err := services.GetMachineFingerprint()
+	if err != nil {
+		log.Printf("[License] Warning: failed to get machine fingerprint: %v", err)
+		fingerprint = "unknown"
+	}
+	// Use env var, fallback to persisted key file
+	licenseKey := cfg.LicenseKey
+	if licenseKey == "" {
+		if saved, err := os.ReadFile("data/.license-key"); err == nil {
+			licenseKey = strings.TrimSpace(string(saved))
 		}
 	}
-
-	if !cfg.LicenseServerMode {
-		// Client mode: phone home to validate license
-		fingerprint, err := services.GetMachineFingerprint()
-		if err != nil {
-			log.Printf("[License] Warning: failed to get machine fingerprint: %v", err)
-			fingerprint = "unknown"
-		}
-		licenseClient = services.NewLicenseClient(cfg.LicenseKey, cfg.LicenseServerURL, fingerprint, "1.0.0", cfg.ServerDomain)
-		if err := licenseClient.Start(); err != nil {
-			log.Fatalf("[License] %v", err)
-		}
-		defer licenseClient.Stop()
-		log.Printf("[License] Status: %s", licenseClient.GetStatus().Message)
+	licenseClient := services.NewLicenseClient(licenseKey, cfg.LicenseServerURL, fingerprint, "1.0.0", cfg.ServerDomain)
+	if err := licenseClient.Start(); err != nil {
+		log.Fatalf("[License] %v", err)
 	}
+	defer licenseClient.Stop()
+	log.Printf("[License] Status: %s", licenseClient.GetStatus().Message)
 
 	// Create subtitles directory
 	subtitlesDir := "data/subtitles"
@@ -219,20 +201,6 @@ func main() {
 
 	// Initialize analytics handler
 	analyticsHandler := handlers.NewAnalyticsHandler(db, torrentService)
-
-	// License API endpoints (authority mode — public, called by customer binaries)
-	if cfg.LicenseServerMode && licenseHandler != nil {
-		r.Route("/api/v2/license", func(r chi.Router) {
-			r.Post("/validate", licenseHandler.Validate)
-			r.Post("/activate", licenseHandler.Activate)
-			r.Post("/heartbeat", licenseHandler.Heartbeat)
-			r.Post("/deactivate", licenseHandler.Deactivate)
-			r.Get("/lookup", paddleHandler.LicenseLookup)
-		})
-
-		// Paddle webhook (public, signature-verified)
-		r.Post("/api/v2/paddle/webhook", paddleHandler.HandleWebhook)
-	}
 
 	// YTS-compatible API (public)
 	r.Route("/api/v2", func(r chi.Router) {
@@ -495,34 +463,50 @@ func main() {
 				})
 			})
 
-			// License admin API (authority mode)
-			if cfg.LicenseServerMode && licenseHandler != nil {
-				r.Get("/api/licenses", licenseHandler.AdminListLicenses)
-				r.Post("/api/licenses", licenseHandler.AdminCreateLicense)
-				r.Get("/api/licenses/{id}", licenseHandler.AdminGetLicense)
-				r.Put("/api/licenses/{id}", licenseHandler.AdminUpdateLicense)
-				r.Delete("/api/licenses/{id}", licenseHandler.AdminDeleteLicense)
-				r.Get("/api/licenses/{id}/deployments", licenseHandler.AdminGetDeployments)
-				r.Delete("/api/licenses/{id}/deployments/{did}", licenseHandler.AdminDeactivateDeployment)
-			}
-
-			// License status endpoint (all modes)
+			// License management — single license for this server
 			r.Get("/api/license-status", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				result := map[string]interface{}{
-					"server_mode": cfg.LicenseServerMode,
+				hostname, _ := os.Hostname()
+				status := licenseClient.GetStatus()
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":      status,
+					"fingerprint": licenseClient.GetFingerprint(),
+					"hostname":    hostname,
+					"domain":      r.Host,
+					"server_url":  cfg.LicenseServerURL,
+				})
+			})
+
+			r.Post("/api/license-activate", func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					LicenseKey string `json:"license_key"`
 				}
-				if licenseClient != nil {
-					status := licenseClient.GetStatus()
-					result["status"] = status
-				} else if cfg.LicenseServerMode {
-					result["status"] = map[string]interface{}{
-						"mode":    "authority",
-						"message": "Running as license authority server",
-						"valid":   true,
-					}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.LicenseKey == "" {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(map[string]string{"error": "license_key is required"})
+					return
 				}
-				json.NewEncoder(w).Encode(result)
+
+				key := strings.TrimSpace(body.LicenseKey)
+				if err := licenseClient.Restart(key); err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnprocessableEntity)
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"error":  err.Error(),
+						"status": licenseClient.GetStatus(),
+					})
+					return
+				}
+
+				hostname, _ := os.Hostname()
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":      licenseClient.GetStatus(),
+					"fingerprint": licenseClient.GetFingerprint(),
+					"hostname":    hostname,
+					"domain":      r.Host,
+				})
 			})
 
 			// YTS Mirror settings

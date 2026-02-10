@@ -10,10 +10,10 @@ type Config struct {
 	DatabasePath      string
 	DownloadDir       string
 	OmdbAPIKey        string
-	LicenseKey        string
-	LicenseServerURL  string
-	LicenseServerMode bool
-	ServerDomain      string
+	LicenseKey          string
+	LicenseServerURL    string
+	LicenseAdminSecret  string
+	ServerDomain        string
 
 	// Paddle
 	PaddleWebhookSecret  string
@@ -37,8 +37,8 @@ func Load() *Config {
 		OmdbAPIKey:        getEnv("OMDB_API_KEY", ""),
 		LicenseKey:        getEnv("LICENSE_KEY", ""),
 		LicenseServerURL:  getEnv("LICENSE_SERVER_URL", "https://license.omnius.lol"),
-		LicenseServerMode: getEnv("LICENSE_SERVER_MODE", "false") == "true",
-		ServerDomain:      getEnv("SERVER_DOMAIN", ""),
+		LicenseAdminSecret: getEnv("LICENSE_ADMIN_SECRET", ""),
+		ServerDomain:       getEnv("SERVER_DOMAIN", ""),
 
 		PaddleWebhookSecret:   getEnv("PADDLE_WEBHOOK_SECRET", ""),
 		PaddlePersonalPriceID: getEnv("PADDLE_PERSONAL_PRICE_ID", ""),
