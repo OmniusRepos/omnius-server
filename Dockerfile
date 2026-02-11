@@ -1,10 +1,14 @@
 FROM golang:1.24-alpine AS builder
+RUN apk add --no-cache git
 WORKDIR /app
-# Cache buster: 20260209a
 COPY go.* ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o main .
+ARG VERSION=dev
+RUN if [ "$VERSION" = "dev" ] && [ -d .git ]; then \
+      VERSION=$(git describe --tags --always 2>/dev/null || echo "dev"); \
+    fi && \
+    CGO_ENABLED=0 go build -ldflags "-X main.Version=${VERSION}" -o main .
 
 FROM alpine:latest
 WORKDIR /app
