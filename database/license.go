@@ -11,9 +11,9 @@ import (
 
 func (d *DB) CreateLicense(l *models.License) (int64, error) {
 	res, err := d.Exec(`
-		INSERT INTO licenses (license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		l.LicenseKey, l.Plan, l.OwnerEmail, l.OwnerName, l.MaxDeployments, l.IsActive, l.Notes, l.ExpiresAt,
+		INSERT INTO licenses (license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, features, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		l.LicenseKey, l.Plan, l.OwnerEmail, l.OwnerName, l.MaxDeployments, l.IsActive, l.Notes, l.Features, l.ExpiresAt,
 	)
 	if err != nil {
 		return 0, err
@@ -25,14 +25,16 @@ func (d *DB) GetLicenseByKey(key string) (*models.License, error) {
 	l := &models.License{}
 	var expiresAt, revokedAt sql.NullTime
 	var isActive int
+	var features sql.NullString
 	err := d.QueryRow(`
-		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, created_at, expires_at, revoked_at
+		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, features, created_at, expires_at, revoked_at
 		FROM licenses WHERE license_key = ?`, key,
-	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &l.CreatedAt, &expiresAt, &revokedAt)
+	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &features, &l.CreatedAt, &expiresAt, &revokedAt)
 	if err != nil {
 		return nil, err
 	}
 	l.IsActive = isActive == 1
+	l.Features = features.String
 	if expiresAt.Valid {
 		l.ExpiresAt = &expiresAt.Time
 	}
@@ -46,14 +48,16 @@ func (d *DB) GetLicenseByID(id int64) (*models.License, error) {
 	l := &models.License{}
 	var expiresAt, revokedAt sql.NullTime
 	var isActive int
+	var features sql.NullString
 	err := d.QueryRow(`
-		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, created_at, expires_at, revoked_at
+		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, features, created_at, expires_at, revoked_at
 		FROM licenses WHERE id = ?`, id,
-	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &l.CreatedAt, &expiresAt, &revokedAt)
+	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &features, &l.CreatedAt, &expiresAt, &revokedAt)
 	if err != nil {
 		return nil, err
 	}
 	l.IsActive = isActive == 1
+	l.Features = features.String
 	if expiresAt.Valid {
 		l.ExpiresAt = &expiresAt.Time
 	}
@@ -65,7 +69,7 @@ func (d *DB) GetLicenseByID(id int64) (*models.License, error) {
 
 func (d *DB) ListLicenses() ([]models.License, error) {
 	rows, err := d.Query(`
-		SELECT l.id, l.license_key, l.plan, l.owner_email, l.owner_name, l.max_deployments, l.is_active, l.notes, l.created_at, l.expires_at, l.revoked_at,
+		SELECT l.id, l.license_key, l.plan, l.owner_email, l.owner_name, l.max_deployments, l.is_active, l.notes, l.features, l.created_at, l.expires_at, l.revoked_at,
 		       COALESCE((SELECT COUNT(*) FROM license_deployments WHERE license_id = l.id AND is_active = 1), 0) AS active_deployments
 		FROM licenses l ORDER BY l.created_at DESC`)
 	if err != nil {
@@ -78,10 +82,12 @@ func (d *DB) ListLicenses() ([]models.License, error) {
 		var l models.License
 		var expiresAt, revokedAt sql.NullTime
 		var isActive int
-		if err := rows.Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &l.CreatedAt, &expiresAt, &revokedAt, &l.ActiveDeployments); err != nil {
+		var features sql.NullString
+		if err := rows.Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &features, &l.CreatedAt, &expiresAt, &revokedAt, &l.ActiveDeployments); err != nil {
 			continue
 		}
 		l.IsActive = isActive == 1
+		l.Features = features.String
 		if expiresAt.Valid {
 			l.ExpiresAt = &expiresAt.Time
 		}
@@ -137,14 +143,16 @@ func (d *DB) GetLicenseByPaddleTransaction(txnID string) (*models.License, error
 	l := &models.License{}
 	var expiresAt, revokedAt sql.NullTime
 	var isActive int
+	var features sql.NullString
 	err := d.QueryRow(`
-		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, created_at, expires_at, revoked_at
+		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, features, created_at, expires_at, revoked_at
 		FROM licenses WHERE notes LIKE ?`, "%Paddle transaction: "+txnID+"%",
-	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &l.CreatedAt, &expiresAt, &revokedAt)
+	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &features, &l.CreatedAt, &expiresAt, &revokedAt)
 	if err != nil {
 		return nil, err
 	}
 	l.IsActive = isActive == 1
+	l.Features = features.String
 	if expiresAt.Valid {
 		l.ExpiresAt = &expiresAt.Time
 	}
@@ -159,14 +167,16 @@ func (d *DB) GetLicenseByEmail(email string) (*models.License, error) {
 	l := &models.License{}
 	var expiresAt, revokedAt sql.NullTime
 	var isActive int
+	var features sql.NullString
 	err := d.QueryRow(`
-		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, created_at, expires_at, revoked_at
+		SELECT id, license_key, plan, owner_email, owner_name, max_deployments, is_active, notes, features, created_at, expires_at, revoked_at
 		FROM licenses WHERE owner_email = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1`, email,
-	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &l.CreatedAt, &expiresAt, &revokedAt)
+	).Scan(&l.ID, &l.LicenseKey, &l.Plan, &l.OwnerEmail, &l.OwnerName, &l.MaxDeployments, &isActive, &l.Notes, &features, &l.CreatedAt, &expiresAt, &revokedAt)
 	if err != nil {
 		return nil, err
 	}
 	l.IsActive = isActive == 1
+	l.Features = features.String
 	if expiresAt.Valid {
 		l.ExpiresAt = &expiresAt.Time
 	}

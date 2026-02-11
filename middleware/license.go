@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"torrent-server/models"
 	"torrent-server/services"
 )
 
@@ -53,6 +54,50 @@ func (lm *LicenseMiddleware) EnforceValid(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// EnforceLiveChannels blocks channel API endpoints unless the license has the live_channels feature.
+// Enterprise licenses (OMNI-LIVE-XXXX-XXXX) include this feature.
+func (lm *LicenseMiddleware) EnforceLiveChannels(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Only check channel-related endpoints
+		if !isChannelEndpoint(path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Allow if license has live_channels feature
+		if lm.client.HasFeature(models.FeatureLiveChannels) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":         "error",
+			"status_message": "Live channels require an Enterprise license (OMNI-LIVE). Upgrade at https://omnius.stream/pricing",
+		})
+	})
+}
+
+func isChannelEndpoint(path string) bool {
+	channelPaths := []string{
+		"/api/v2/list_channels.json",
+		"/api/v2/channel_details.json",
+		"/api/v2/channel_countries.json",
+		"/api/v2/channel_categories.json",
+		"/api/v2/channels_by_country.json",
+		"/api/v2/channel_epg.json",
+	}
+	for _, cp := range channelPaths {
+		if path == cp {
+			return true
+		}
+	}
+	return false
 }
 
 // DemoLimiter applies demo mode restrictions (max 10 movies, 2 series, no channels)

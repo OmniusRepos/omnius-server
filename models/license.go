@@ -9,6 +9,21 @@ const (
 	PlanEnterprise = "enterprise"
 )
 
+// License features
+const (
+	FeatureLiveChannels = "live_channels"
+)
+
+// PlanFeatures returns the default features for each plan
+func PlanFeatures(plan string) []string {
+	switch plan {
+	case PlanEnterprise:
+		return []string{FeatureLiveChannels}
+	default:
+		return []string{}
+	}
+}
+
 // License represents a license key and its metadata
 type License struct {
 	ID             int64      `json:"id"`
@@ -22,6 +37,7 @@ type License struct {
 	CreatedAt      time.Time  `json:"created_at"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
+	Features string `json:"features,omitempty"` // comma-separated feature flags
 	// Computed fields
 	ActiveDeployments int `json:"active_deployments,omitempty"`
 }
@@ -94,13 +110,14 @@ type LicenseDeactivateRequest struct {
 
 // LicenseResponse is returned by the authority to client binaries
 type LicenseResponse struct {
-	Valid          bool   `json:"valid"`
-	Plan           string `json:"plan,omitempty"`
-	Status         string `json:"status"` // "active", "expired", "revoked", "over_limit", "invalid"
-	Message        string `json:"message,omitempty"`
-	MaxDeployments int    `json:"max_deployments,omitempty"`
-	GraceDays      int    `json:"grace_days,omitempty"`
-	ExpiresAt      string `json:"expires_at,omitempty"`
+	Valid          bool     `json:"valid"`
+	Plan           string   `json:"plan,omitempty"`
+	Status         string   `json:"status"` // "active", "expired", "revoked", "over_limit", "invalid"
+	Message        string   `json:"message,omitempty"`
+	MaxDeployments int      `json:"max_deployments,omitempty"`
+	GraceDays      int      `json:"grace_days,omitempty"`
+	ExpiresAt      string   `json:"expires_at,omitempty"`
+	Features       []string `json:"features,omitempty"`
 }
 
 // AdminCreateLicenseRequest is used by the admin to create a new license
@@ -135,4 +152,5 @@ type LicenseCacheData struct {
 	ExpiresAt     string    `json:"expires_at,omitempty"`
 	Fingerprint   string    `json:"fingerprint"`
 	ServerVersion string    `json:"server_version"`
+	Features      []string  `json:"features,omitempty"`
 }

@@ -509,6 +509,7 @@ func (d *DB) migrate() error {
 			max_deployments INTEGER DEFAULT 1,
 			is_active INTEGER DEFAULT 1,
 			notes TEXT,
+			features TEXT DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			expires_at DATETIME,
 			revoked_at DATETIME
@@ -542,6 +543,14 @@ func (d *DB) migrate() error {
 		"CREATE INDEX IF NOT EXISTS idx_events_license ON license_events(license_id)",
 	}
 	for _, m := range licenseMigrations {
+		d.Exec(m)
+	}
+
+	// License column additions (for existing tables)
+	licenseColumnMigrations := []string{
+		"ALTER TABLE licenses ADD COLUMN features TEXT DEFAULT ''",
+	}
+	for _, m := range licenseColumnMigrations {
 		d.Exec(m)
 	}
 

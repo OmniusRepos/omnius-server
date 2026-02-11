@@ -174,6 +174,7 @@ func main() {
 	if licenseClient != nil {
 		licenseMw := authMiddleware.NewLicenseMiddleware(licenseClient)
 		r.Use(licenseMw.EnforceValid)
+		r.Use(licenseMw.EnforceLiveChannels)
 		demoLimiter := authMiddleware.NewDemoLimiter(licenseClient)
 		r.Use(demoLimiter.InjectDemoFlag)
 	}

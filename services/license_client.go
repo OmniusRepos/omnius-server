@@ -38,13 +38,14 @@ type LicenseClient struct {
 
 // LicenseStatus represents the current license state of this instance
 type LicenseStatus struct {
-	Mode       string `json:"mode"`        // "licensed", "demo", "grace", "invalid"
-	Plan       string `json:"plan"`        // plan name if licensed
-	Message    string `json:"message"`     // human-readable status
-	GraceEnd   string `json:"grace_end"`   // when grace period expires
-	Valid      bool   `json:"valid"`       // whether the server should operate normally
-	DemoMode   bool   `json:"demo_mode"`   // true if running in demo mode
-	LicenseKey string `json:"license_key"` // masked key for display
+	Mode       string   `json:"mode"`        // "licensed", "demo", "grace", "invalid"
+	Plan       string   `json:"plan"`        // plan name if licensed
+	Message    string   `json:"message"`     // human-readable status
+	GraceEnd   string   `json:"grace_end"`   // when grace period expires
+	Valid      bool     `json:"valid"`       // whether the server should operate normally
+	DemoMode   bool     `json:"demo_mode"`   // true if running in demo mode
+	LicenseKey string   `json:"license_key"` // masked key for display
+	Features   []string `json:"features"`    // enabled features for this license
 }
 
 func NewLicenseClient(licenseKey, serverURL, fingerprint, version, domain string) *LicenseClient {
@@ -93,6 +94,7 @@ func (c *LicenseClient) Start() error {
 				Message:    "License active (cached)",
 				Valid:      true,
 				LicenseKey: maskedKey,
+				Features:   c.cache.Features,
 			}
 			c.mu.Unlock()
 
@@ -121,6 +123,7 @@ func (c *LicenseClient) Start() error {
 				GraceEnd:   graceEnd.Format(time.RFC3339),
 				Valid:      true,
 				LicenseKey: maskedKey,
+				Features:   c.cache.Features,
 			}
 			c.mu.Unlock()
 			go c.heartbeatLoop()
@@ -222,6 +225,18 @@ func (c *LicenseClient) IsDemo() bool {
 	return c.status.DemoMode
 }
 
+// HasFeature returns true if the current license includes the specified feature
+func (c *LicenseClient) HasFeature(feature string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, f := range c.status.Features {
+		if f == feature {
+			return true
+		}
+	}
+	return false
+}
+
 // IsValid returns true if the license allows normal operation
 func (c *LicenseClient) IsValid() bool {
 	c.mu.RLock()
@@ -296,6 +311,7 @@ func (c *LicenseClient) applyResponse(resp *models.LicenseResponse, maskedKey st
 		Message:    "License active",
 		Valid:      true,
 		LicenseKey: maskedKey,
+		Features:   resp.Features,
 	}
 	c.mu.Unlock()
 
@@ -309,6 +325,7 @@ func (c *LicenseClient) applyResponse(resp *models.LicenseResponse, maskedKey st
 		ExpiresAt:     resp.ExpiresAt,
 		Fingerprint:   c.fingerprint,
 		ServerVersion: c.serverVersion,
+		Features:      resp.Features,
 	})
 
 	log.Printf("[License] Activated: plan=%s, key=%s", resp.Plan, maskedKey)

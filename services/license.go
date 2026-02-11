@@ -23,8 +23,22 @@ func NewLicenseService(db *database.DB) *LicenseService {
 
 // GenerateKey creates a new license key in the format OMNI-XXXX-XXXX-XXXX-XXXX
 func GenerateKey() string {
+	return generateKeyWithPrefix("OMNI")
+}
+
+// GenerateLiveKey creates a license key in the format OMNI-LIVE-XXXX-XXXX
+// for enterprise licenses that include live channel support
+func GenerateLiveKey() string {
+	return generateKeyWithPrefix("OMNI-LIVE")
+}
+
+func generateKeyWithPrefix(prefix string) string {
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no ambiguous: 0/O, 1/I/L
-	segments := make([]string, 4)
+	segCount := 4
+	if prefix == "OMNI-LIVE" {
+		segCount = 2 // OMNI-LIVE-XXXX-XXXX
+	}
+	segments := make([]string, segCount)
 	for i := range segments {
 		b := make([]byte, 4)
 		rand.Read(b)
@@ -34,13 +48,16 @@ func GenerateKey() string {
 		}
 		segments[i] = string(seg)
 	}
-	return "OMNI-" + strings.Join(segments, "-")
+	return prefix + "-" + strings.Join(segments, "-")
+}
+
+// IsLiveKey checks if a license key is a live-enabled enterprise key
+func IsLiveKey(key string) bool {
+	return strings.HasPrefix(key, "OMNI-LIVE-")
 }
 
 // CreateLicense generates a key and persists a new license
 func (s *LicenseService) CreateLicense(req *models.AdminCreateLicenseRequest) (*models.License, error) {
-	key := GenerateKey()
-
 	maxDep := req.MaxDeployments
 	if maxDep <= 0 {
 		switch req.Plan {
@@ -55,6 +72,15 @@ func (s *LicenseService) CreateLicense(req *models.AdminCreateLicenseRequest) (*
 		}
 	}
 
+	// Enterprise plan gets a live key with live_channels feature
+	features := models.PlanFeatures(req.Plan)
+	var key string
+	if req.Plan == models.PlanEnterprise {
+		key = GenerateLiveKey()
+	} else {
+		key = GenerateKey()
+	}
+
 	l := &models.License{
 		LicenseKey:     key,
 		Plan:           req.Plan,
@@ -63,6 +89,7 @@ func (s *LicenseService) CreateLicense(req *models.AdminCreateLicenseRequest) (*
 		MaxDeployments: maxDep,
 		IsActive:       true,
 		Notes:          req.Notes,
+		Features:       strings.Join(features, ","),
 	}
 
 	if req.ExpiresAt != "" {
@@ -105,17 +132,32 @@ func (s *LicenseService) ValidateKey(key, fingerprint string) *models.LicenseRes
 		return &models.LicenseResponse{Valid: false, Status: "expired", Message: "License has expired"}
 	}
 
+	features := parseFeaturesFromLicense(l)
 	resp := &models.LicenseResponse{
 		Valid:          true,
 		Plan:           l.Plan,
 		Status:         "active",
 		MaxDeployments: l.MaxDeployments,
 		GraceDays:      7,
+		Features:       features,
 	}
 	if l.ExpiresAt != nil {
 		resp.ExpiresAt = l.ExpiresAt.Format(time.RFC3339)
 	}
 	return resp
+}
+
+// parseFeaturesFromLicense returns the features list from a license.
+// Uses stored features field, falls back to key prefix detection + plan defaults.
+func parseFeaturesFromLicense(l *models.License) []string {
+	if l.Features != "" {
+		return strings.Split(l.Features, ",")
+	}
+	// Fallback: detect from key format or plan
+	if IsLiveKey(l.LicenseKey) {
+		return []string{models.FeatureLiveChannels}
+	}
+	return models.PlanFeatures(l.Plan)
 }
 
 // Activate registers or reactivates a deployment for a license
@@ -154,12 +196,14 @@ func (s *LicenseService) Activate(req *models.LicenseActivateRequest, ip string)
 
 	s.db.LogLicenseEvent(l.ID, models.EventActivated, req.MachineFingerprint, ip, req.MachineLabel)
 
+	features := parseFeaturesFromLicense(l)
 	resp := &models.LicenseResponse{
 		Valid:          true,
 		Plan:           l.Plan,
 		Status:         "active",
 		MaxDeployments: l.MaxDeployments,
 		GraceDays:      7,
+		Features:       features,
 	}
 	if l.ExpiresAt != nil {
 		resp.ExpiresAt = l.ExpiresAt.Format(time.RFC3339)
