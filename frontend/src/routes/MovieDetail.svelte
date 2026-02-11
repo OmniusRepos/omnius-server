@@ -29,6 +29,9 @@
   let showDeleteModal = false;
   let showTorrentModal = false;
   let showFranchiseModal = false;
+  let showTypeMismatchModal = false;
+  let typeMismatchInfo: { actual_type: string; imdb_code: string; movie_id: number; title: string } | null = null;
+  let movingToSeries = false;
 
   // Franchise search
   let franchiseSearch = '';
@@ -183,6 +186,20 @@
       });
       if (res.ok) {
         await loadMovie(); // Reload movie data
+      } else if (res.status === 409) {
+        // Type mismatch — IMDB says this is not a movie
+        const data = await res.json();
+        if (data.status === 'type_mismatch') {
+          typeMismatchInfo = {
+            actual_type: data.actual_type,
+            imdb_code: data.imdb_code,
+            movie_id: data.movie_id,
+            title: data.title,
+          };
+          showTypeMismatchModal = true;
+        } else {
+          alert('Failed to refresh: ' + (data.status_message || 'Unknown error'));
+        }
       } else {
         const data = await res.json();
         alert('Failed to refresh: ' + (data.status_message || 'Unknown error'));
@@ -191,6 +208,41 @@
       console.error('Failed to refresh movie:', err);
     } finally {
       refreshing = false;
+    }
+  }
+
+  async function moveToSeries() {
+    if (!typeMismatchInfo) return;
+    movingToSeries = true;
+    try {
+      const res = await fetch('/admin/api/move-to-series', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imdb_code: typeMismatchInfo.imdb_code,
+          movie_id: typeMismatchInfo.movie_id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert('Failed to move to series: ' + (data.error || 'Unknown error'));
+        return;
+      }
+
+      showTypeMismatchModal = false;
+      typeMismatchInfo = null;
+
+      // Redirect to the new series
+      if (data.series_id) {
+        push('/tvshows/' + data.series_id);
+      } else {
+        push('/tvshows');
+      }
+    } catch (err) {
+      console.error('Failed to move to series:', err);
+      alert('Error moving to series: ' + err);
+    } finally {
+      movingToSeries = false;
     }
   }
 
@@ -1080,6 +1132,22 @@
   {/if}
   <svelte:fragment slot="footer">
     <button class="btn btn-secondary" on:click={() => showPreviewModal = false}>Close</button>
+  </svelte:fragment>
+</Modal>
+
+<!-- Type Mismatch Modal -->
+<Modal bind:open={showTypeMismatchModal} title="Wrong Content Type" size="md" on:close={() => { showTypeMismatchModal = false; typeMismatchInfo = null; }}>
+  {#if typeMismatchInfo}
+    <div class="type-mismatch-info">
+      <p>IMDB reports that <strong>{typeMismatchInfo.title}</strong> (<code>{typeMismatchInfo.imdb_code}</code>) is a <strong class="type-badge">{typeMismatchInfo.actual_type}</strong>, not a movie.</p>
+      <p class="text-muted mt-2">Would you like to move it to TV Shows instead? This will delete the movie entry and add it as a series.</p>
+    </div>
+  {/if}
+  <svelte:fragment slot="footer">
+    <button class="btn btn-secondary" on:click={() => { showTypeMismatchModal = false; typeMismatchInfo = null; }} disabled={movingToSeries}>Cancel</button>
+    <button class="btn btn-primary" on:click={moveToSeries} disabled={movingToSeries}>
+      {movingToSeries ? 'Moving...' : 'Move to TV Shows'}
+    </button>
   </svelte:fragment>
 </Modal>
 
@@ -2105,5 +2173,18 @@
     overflow-y: auto;
     white-space: pre-wrap;
     color: var(--text-secondary);
+  }
+
+  .type-mismatch-info {
+    padding: 16px 0;
+  }
+
+  .type-badge {
+    color: var(--accent-red, #ef4444);
+    text-transform: uppercase;
+  }
+
+  .mt-2 {
+    margin-top: 8px;
   }
 </style>

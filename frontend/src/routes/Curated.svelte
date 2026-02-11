@@ -7,7 +7,7 @@
 
   onMount(async () => {
     try {
-      lists = await getCuratedLists();
+      lists = (await getCuratedLists()) || [];
     } catch (err) {
       console.error('Failed to load curated lists:', err);
     } finally {

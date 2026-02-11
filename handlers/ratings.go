@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"torrent-server/database"
 	"torrent-server/models"
@@ -305,7 +306,27 @@ func (h *RatingsHandler) RefreshMovie(w http.ResponseWriter, r *http.Request) {
 	// Refresh the movie data
 	refreshed, err := h.syncService.RefreshMovie(movie)
 	if err != nil {
-		writeError(w, "Failed to refresh movie: "+err.Error())
+		errMsg := err.Error()
+		// Detect type mismatch — extract actual IMDB type so frontend can offer to move
+		if strings.Contains(errMsg, "not a movie:") && strings.Contains(errMsg, " is a ") {
+			parts := strings.SplitAfter(errMsg, " is a ")
+			actualType := ""
+			if len(parts) >= 2 {
+				actualType = strings.TrimSpace(parts[len(parts)-1])
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":         "type_mismatch",
+				"status_message": errMsg,
+				"actual_type":    actualType,
+				"imdb_code":      movie.ImdbCode,
+				"movie_id":       movie.ID,
+				"title":          movie.Title,
+			})
+			return
+		}
+		writeError(w, "Failed to refresh movie: "+errMsg)
 		return
 	}
 

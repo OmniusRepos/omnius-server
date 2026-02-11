@@ -35,6 +35,9 @@ var templatesFS embed.FS
 //go:embed static/*
 var staticFS embed.FS
 
+// Version is set at build time via -ldflags "-X main.Version=..."
+var Version = "dev"
+
 const imdbAPIBaseURL = "https://api.imdbapi.dev"
 // YTS API URL - auto-detected from working mirrors
 var ytsAPIBaseURL string
@@ -402,6 +405,49 @@ func main() {
 			r.Post("/api/refresh_all_movies", ratingsHandler.RefreshAllMovies)
 			r.Post("/api/refresh_all_series", ratingsHandler.RefreshAllSeries)
 
+			// Move movie to series (when IMDB type is actually a series)
+			r.Post("/api/move-to-series", func(w http.ResponseWriter, rq *http.Request) {
+				var req struct {
+					ImdbCode string `json:"imdb_code"`
+					MovieID  uint   `json:"movie_id"`
+				}
+				if err := json.NewDecoder(rq.Body).Decode(&req); err != nil || req.ImdbCode == "" || req.MovieID == 0 {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(map[string]string{"error": "imdb_code and movie_id are required"})
+					return
+				}
+
+				// Create series entry
+				series, err := syncService.SyncSeries(req.ImdbCode)
+				if err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create series: " + err.Error()})
+					return
+				}
+
+				// Populate with IMDB data (best-effort — may fail for unusual types)
+				refreshed, refreshErr := syncService.RefreshSeries(series)
+				if refreshErr != nil {
+					log.Printf("[MoveToSeries] RefreshSeries failed for %s: %v (series created with ID %d)", req.ImdbCode, refreshErr, series.ID)
+				} else {
+					series = refreshed
+				}
+
+				// Delete the movie
+				if err := db.DeleteMovie(req.MovieID); err != nil {
+					log.Printf("[MoveToSeries] Warning: failed to delete movie %d: %v", req.MovieID, err)
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":    "ok",
+					"series_id": series.ID,
+					"title":     series.Title,
+				})
+			})
+
 			// Movies API
 			r.Get("/api/movies", func(w http.ResponseWriter, r *http.Request) {
 				movies, count, _ := db.ListMovies(database.MovieFilter{Limit: 50, Page: 1})
@@ -596,6 +642,55 @@ func main() {
 			})
 		})
 
+		// Check for updates via GitHub releases API
+		r.Get("/api/check-update", func(w http.ResponseWriter, rq *http.Request) {
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Get("https://api.github.com/repos/OmniusRepos/omnius-releases/releases/latest")
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadGateway)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Failed to check for updates"})
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != 200 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"update_available": false,
+					"current_version":  Version,
+					"message":          "Could not check for updates",
+				})
+				return
+			}
+
+			var release struct {
+				TagName     string `json:"tag_name"`
+				PublishedAt string `json:"published_at"`
+				Body        string `json:"body"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"update_available": false,
+					"current_version":  Version,
+				})
+				return
+			}
+
+			latestVersion := strings.TrimPrefix(release.TagName, "v")
+			hasUpdate := Version == "dev" || latestVersion != Version
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"update_available": hasUpdate,
+				"current_version":  Version,
+				"latest_version":   latestVersion,
+				"published_at":     release.PublishedAt,
+				"release_notes":    release.Body,
+			})
+		})
+
 		// Auto-update: download latest binary from GitHub releases and restart
 			r.Post("/api/update", func(w http.ResponseWriter, r *http.Request) {
 				execPath, err := os.Executable()
@@ -694,9 +789,14 @@ func main() {
 					"message": "Update complete. Restarting...",
 				})
 
+				// Flush response before exiting
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+
 				// Exit after response — Docker/systemd will restart with new binary
 				go func() {
-					time.Sleep(500 * time.Millisecond)
+					time.Sleep(2 * time.Second)
 					os.Exit(0)
 				}()
 			})

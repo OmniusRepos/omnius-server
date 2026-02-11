@@ -32,15 +32,24 @@
   let syncMessage = $state<string | null>(null);
 
   // Update state
+  let checking = $state(false);
   let updating = $state(false);
   let updateMessage = $state<string | null>(null);
   let updateError = $state(false);
+  let updateInfo = $state<{
+    update_available: boolean;
+    current_version: string;
+    latest_version?: string;
+    published_at?: string;
+    release_notes?: string;
+  } | null>(null);
 
   // Feature check
   let hasLiveChannels = $derived(licenseStatus?.status?.features?.includes('live_channels') ?? false);
   let filteredServices = $derived(
     hasLiveChannels ? services : services.filter((s: ServiceConfig) => s.icon !== 'live')
   );
+  let isEnterprise = $derived(licenseStatus?.status?.plan === 'enterprise');
 
   onMount(async () => {
     await Promise.all([loadYTSSettings(), loadServices(), loadLicenseStatus()]);
@@ -192,6 +201,26 @@
     }
   }
 
+  async function checkForUpdates() {
+    checking = true;
+    updateMessage = null;
+    updateError = false;
+    updateInfo = null;
+    try {
+      const res = await fetch('/admin/api/check-update');
+      const data = await res.json();
+      updateInfo = data;
+      if (!data.update_available) {
+        updateMessage = 'You are running the latest version.';
+      }
+    } catch (e) {
+      updateError = true;
+      updateMessage = 'Failed to check for updates: ' + String(e);
+    } finally {
+      checking = false;
+    }
+  }
+
   async function triggerUpdate() {
     updating = true;
     updateMessage = null;
@@ -204,7 +233,6 @@
       const data = await res.json();
       if (res.ok) {
         updateMessage = 'Update downloaded. Server is restarting...';
-        // Poll until server responds (any status means it's back)
         setTimeout(async () => {
           for (let i = 0; i < 30; i++) {
             try {
@@ -244,11 +272,6 @@
     <button class="tab" class:active={activeTab === 'services'} onclick={() => activeTab = 'services'}>
       Services
     </button>
-    {#if licenseStatus?.status?.valid}
-      <button class="tab" class:active={activeTab === 'general'} onclick={() => activeTab = 'general'}>
-        General
-      </button>
-    {/if}
     <button class="tab" class:active={activeTab === 'sync'} onclick={() => activeTab = 'sync'}>
       Data Sync
     </button>
@@ -261,6 +284,11 @@
     <button class="tab" class:active={activeTab === 'license'} onclick={() => activeTab = 'license'}>
       License
     </button>
+    {#if isEnterprise}
+    <button class="tab" class:active={activeTab === 'yts'} onclick={() => activeTab = 'yts'}>
+      YTS
+    </button>
+    {/if}
     <button class="tab" class:active={activeTab === 'update'} onclick={() => activeTab = 'update'}>
       Update
     </button>
@@ -325,8 +353,8 @@
     </div>
   {/if}
 
-  <!-- General Tab (hidden in demo/unlicensed — internal torrent config) -->
-  {#if activeTab === 'general' && licenseStatus?.status?.valid}
+  <!-- YTS Tab (enterprise only) -->
+  {#if activeTab === 'yts'}
     <div class="card">
       <h3>YTS Mirror Configuration</h3>
       <p class="text-muted mb-4">Select the YTS mirror to use for torrent searches.</p>
@@ -442,7 +470,7 @@
         <div class="sync-item">
           <div class="sync-info">
             <span class="sync-title">TV Shows</span>
-            <span class="sync-desc">Refresh all TV show metadata from IMDB + torrents from EZTV</span>
+            <span class="sync-desc">Refresh all TV show metadata from IMDB</span>
           </div>
           <button
             class="btn btn-primary"
@@ -461,22 +489,6 @@
       {/if}
     </div>
 
-    {#if licenseStatus?.status?.valid}
-      <div class="card mt-4">
-        <h3>Torrent Sync</h3>
-        <p class="text-muted mb-4">Search and add torrents from YTS, EZTV, and 1337x for all content.</p>
-
-        <div class="sync-buttons">
-          <div class="sync-item">
-            <div class="sync-info">
-              <span class="sync-title">Sync Torrents</span>
-              <span class="sync-desc">Find new torrents for all movies</span>
-            </div>
-            <button class="btn btn-secondary" disabled>Coming Soon</button>
-          </div>
-        </div>
-      </div>
-    {/if}
   {/if}
 
   <!-- API Keys Tab -->
@@ -604,21 +616,41 @@
     <div class="card">
       <h3>Server Update</h3>
       <p class="text-muted mb-4">
-        Download and install the latest Omnius server binary from GitHub Releases. The server will restart automatically after updating.
+        Check for new Omnius server releases. If an update is available you can install it directly.
       </p>
       <div class="sync-buttons">
         <div class="sync-item">
           <div class="sync-info">
-            <span class="sync-title">Update Server</span>
-            <span class="sync-desc">Download the latest release and restart</span>
+            <span class="sync-title">Current Version</span>
+            <span class="sync-desc">{updateInfo?.current_version || 'Unknown'}</span>
           </div>
-          <button class="btn btn-primary" onclick={triggerUpdate} disabled={updating}>
-            {updating ? 'Updating...' : 'Check for Updates'}
+          <button class="btn btn-primary" onclick={checkForUpdates} disabled={checking || updating}>
+            {checking ? 'Checking...' : 'Check for Updates'}
           </button>
         </div>
       </div>
+
+      {#if updateInfo?.update_available}
+        <div class="update-available mt-4">
+          <div class="sync-item" style="border: 1px solid var(--accent-green, #22c55e);">
+            <div class="sync-info">
+              <span class="sync-title" style="color: var(--accent-green, #22c55e);">Update Available: v{updateInfo.latest_version}</span>
+              <span class="sync-desc">
+                Released {updateInfo.published_at ? new Date(updateInfo.published_at).toLocaleDateString() : 'recently'}
+              </span>
+              {#if updateInfo.release_notes}
+                <span class="sync-desc" style="margin-top: 4px; white-space: pre-line;">{updateInfo.release_notes}</span>
+              {/if}
+            </div>
+            <button class="btn btn-primary" onclick={triggerUpdate} disabled={updating}>
+              {updating ? 'Updating...' : 'Install Update'}
+            </button>
+          </div>
+        </div>
+      {/if}
+
       {#if updateMessage}
-        <div class="sync-message" class:error={updateError}>
+        <div class="sync-message mt-4" class:error={updateError}>
           {updateMessage}
         </div>
       {/if}

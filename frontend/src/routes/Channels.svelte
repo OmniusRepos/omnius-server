@@ -69,7 +69,7 @@
   onMount(async () => {
     try {
       const data = await getLicenseStatus();
-      const features: string[] = data.features || [];
+      const features: string[] = data?.status?.features || [];
       if (!features.includes('live_channels')) {
         notFound = true;
         loading = false;

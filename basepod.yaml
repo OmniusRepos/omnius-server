@@ -1,16 +1,16 @@
-name: demo-omnius
+name: omnius-api
 server: bp.common.al
 port: 8080
 domains:
-  - demo.omnius.lol
+  - api.omnius.lol
 build:
   dockerfile: Dockerfile
   context: .
 env:
   LICENSE_SERVER_URL: "https://omnius.stream"
-  LICENSE_KEY: "OMNI-7AA6-Z69K-02LS-XQ3I"
+  LICENSE_KEY: "OMNI-LIVE-EBME-AVUZ"
   ADMIN_PASSWORD: "demo"
   LICENSE_ADMIN_SECRET: "omnius-admin-2026"
-  SERVER_DOMAIN: "demo.omnius.lol"
+  SERVER_DOMAIN: "api.omnius.lol"
 volumes:
-  - demo-omnius-data:/app/data
+  - omnius-data:/app/data
