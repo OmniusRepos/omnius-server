@@ -36,6 +36,12 @@
   let updateMessage = $state<string | null>(null);
   let updateError = $state(false);
 
+  // Feature check
+  let hasLiveChannels = $derived(licenseStatus?.status?.features?.includes('live_channels') ?? false);
+  let filteredServices = $derived(
+    hasLiveChannels ? services : services.filter((s: ServiceConfig) => s.icon !== 'live')
+  );
+
   onMount(async () => {
     await Promise.all([loadYTSSettings(), loadServices(), loadLicenseStatus()]);
   });
@@ -197,23 +203,24 @@
       });
       const data = await res.json();
       if (res.ok) {
-        updateMessage = data.message || 'Update complete. Server is restarting...';
-        // Poll until server comes back
+        updateMessage = 'Update downloaded. Server is restarting...';
+        // Poll until server responds (any status means it's back)
         setTimeout(async () => {
           for (let i = 0; i < 30; i++) {
             try {
-              const check = await fetch('/admin/api/auth/check');
-              if (check.ok) {
-                updateMessage = 'Update complete! Server restarted successfully.';
+              const check = await fetch('/admin/api/stats', { method: 'GET' });
+              if (check.status > 0) {
+                updateMessage = 'Update complete! Reloading...';
                 updating = false;
+                setTimeout(() => window.location.reload(), 1000);
                 return;
               }
             } catch {}
             await new Promise(r => setTimeout(r, 2000));
           }
-          updateMessage = 'Server is restarting. Refresh the page in a moment.';
+          updateMessage = 'Server is restarting. Please refresh the page.';
           updating = false;
-        }, 2000);
+        }, 3000);
       } else {
         updateError = true;
         updateMessage = data.error || 'Update failed';
@@ -237,9 +244,11 @@
     <button class="tab" class:active={activeTab === 'services'} onclick={() => activeTab = 'services'}>
       Services
     </button>
-    <button class="tab" class:active={activeTab === 'general'} onclick={() => activeTab = 'general'}>
-      General
-    </button>
+    {#if licenseStatus?.status?.valid}
+      <button class="tab" class:active={activeTab === 'general'} onclick={() => activeTab = 'general'}>
+        General
+      </button>
+    {/if}
     <button class="tab" class:active={activeTab === 'sync'} onclick={() => activeTab = 'sync'}>
       Data Sync
     </button>
@@ -267,7 +276,7 @@
       </p>
 
       <div class="services-list">
-        {#each services as service}
+        {#each filteredServices as service}
           <div class="service-item" class:disabled={!service.enabled}>
             <div class="service-toggle">
               <button
@@ -316,8 +325,8 @@
     </div>
   {/if}
 
-  <!-- General Tab -->
-  {#if activeTab === 'general'}
+  <!-- General Tab (hidden in demo/unlicensed — internal torrent config) -->
+  {#if activeTab === 'general' && licenseStatus?.status?.valid}
     <div class="card">
       <h3>YTS Mirror Configuration</h3>
       <p class="text-muted mb-4">Select the YTS mirror to use for torrent searches.</p>
@@ -452,20 +461,22 @@
       {/if}
     </div>
 
-    <div class="card mt-4">
-      <h3>Torrent Sync</h3>
-      <p class="text-muted mb-4">Search and add torrents from YTS, EZTV, and 1337x for all content.</p>
+    {#if licenseStatus?.status?.valid}
+      <div class="card mt-4">
+        <h3>Torrent Sync</h3>
+        <p class="text-muted mb-4">Search and add torrents from YTS, EZTV, and 1337x for all content.</p>
 
-      <div class="sync-buttons">
-        <div class="sync-item">
-          <div class="sync-info">
-            <span class="sync-title">Sync Torrents</span>
-            <span class="sync-desc">Find new torrents for all movies</span>
+        <div class="sync-buttons">
+          <div class="sync-item">
+            <div class="sync-info">
+              <span class="sync-title">Sync Torrents</span>
+              <span class="sync-desc">Find new torrents for all movies</span>
+            </div>
+            <button class="btn btn-secondary" disabled>Coming Soon</button>
           </div>
-          <button class="btn btn-secondary" disabled>Coming Soon</button>
         </div>
       </div>
-    </div>
+    {/if}
   {/if}
 
   <!-- API Keys Tab -->
@@ -547,14 +558,6 @@
         <div class="db-row">
           <span class="db-label">LICENSE_KEY</span>
           <span class="db-value">Your license key (empty = demo mode)</span>
-        </div>
-        <div class="db-row">
-          <span class="db-label">LICENSE_SERVER_URL</span>
-          <span class="db-value">Phone-home target (default: https://api.omnius.lol)</span>
-        </div>
-        <div class="db-row">
-          <span class="db-label">LICENSE_SERVER_MODE</span>
-          <span class="db-value">Set to "true" to run as license authority</span>
         </div>
       </div>
     </div>
