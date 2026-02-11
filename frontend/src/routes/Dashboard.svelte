@@ -7,7 +7,6 @@
   let stats = {
     movies: 0,
     series: 0,
-    channels: 0,
     activeStreams: 0,
   };
 
@@ -17,7 +16,6 @@
       stats = {
         movies: data.movies || 0,
         series: data.series || 0,
-        channels: 0,
         activeStreams: 0,
       };
     } catch (e) {
@@ -56,7 +54,6 @@
       <div class="stats-grid">
         <StatCard label="MOVIES" value={stats.movies} />
         <StatCard label="TV" value={stats.series} suffix="SHOWS" />
-        <StatCard label="LIVE" value={stats.channels} suffix="CHANNELS" />
       </div>
     </section>
 

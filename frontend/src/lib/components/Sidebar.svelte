@@ -6,9 +6,16 @@
   const version = '1.0.0';
   const commit = 'abc212';
 
+  interface Props {
+    features?: string[];
+  }
+
+  let { features = [] }: Props = $props();
+
   interface NavItem {
     path: string;
     label: string;
+    feature?: string;
   }
 
   const mainNav: NavItem[] = [
@@ -16,13 +23,15 @@
     { path: '/analytics', label: 'Analytics' },
   ];
 
-  const contentNav: NavItem[] = [
+  const allContentNav: NavItem[] = [
     { path: '/home', label: 'Home Sections' },
     { path: '/movies', label: 'Movies' },
     { path: '/tvshows', label: 'TV Shows' },
-    { path: '/channels', label: 'Live Channels' },
+    { path: '/channels', label: 'Live Channels', feature: 'live_channels' },
     { path: '/curated', label: 'Curated Lists' },
   ];
+
+  let contentNav = $derived(allContentNav.filter(item => !item.feature || features.includes(item.feature)));
 
   const bottomNav: NavItem[] = [
     { path: '/licenses', label: 'Licenses' },
