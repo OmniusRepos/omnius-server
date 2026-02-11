@@ -31,6 +31,11 @@
   let refreshingShows = $state(false);
   let syncMessage = $state<string | null>(null);
 
+  // Update state
+  let updating = $state(false);
+  let updateMessage = $state<string | null>(null);
+  let updateError = $state(false);
+
   onMount(async () => {
     await Promise.all([loadYTSSettings(), loadServices(), loadLicenseStatus()]);
   });
@@ -180,6 +185,46 @@
       refreshingShows = false;
     }
   }
+
+  async function triggerUpdate() {
+    updating = true;
+    updateMessage = null;
+    updateError = false;
+    try {
+      const res = await fetch('/admin/api/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        updateMessage = data.message || 'Update complete. Server is restarting...';
+        // Poll until server comes back
+        setTimeout(async () => {
+          for (let i = 0; i < 30; i++) {
+            try {
+              const check = await fetch('/admin/api/auth/check');
+              if (check.ok) {
+                updateMessage = 'Update complete! Server restarted successfully.';
+                updating = false;
+                return;
+              }
+            } catch {}
+            await new Promise(r => setTimeout(r, 2000));
+          }
+          updateMessage = 'Server is restarting. Refresh the page in a moment.';
+          updating = false;
+        }, 2000);
+      } else {
+        updateError = true;
+        updateMessage = data.error || 'Update failed';
+        updating = false;
+      }
+    } catch (e) {
+      updateError = true;
+      updateMessage = 'Error: ' + String(e);
+      updating = false;
+    }
+  }
 </script>
 
 <div class="settings-page">
@@ -206,6 +251,9 @@
     </button>
     <button class="tab" class:active={activeTab === 'license'} onclick={() => activeTab = 'license'}>
       License
+    </button>
+    <button class="tab" class:active={activeTab === 'update'} onclick={() => activeTab = 'update'}>
+      Update
     </button>
   </div>
 
@@ -546,6 +594,31 @@
           <button class="btn btn-danger" disabled>Clear Data</button>
         </div>
       </div>
+    </div>
+  {/if}
+
+  {#if activeTab === 'update'}
+    <div class="card">
+      <h3>Server Update</h3>
+      <p class="text-muted mb-4">
+        Download and install the latest Omnius server binary from GitHub Releases. The server will restart automatically after updating.
+      </p>
+      <div class="sync-buttons">
+        <div class="sync-item">
+          <div class="sync-info">
+            <span class="sync-title">Update Server</span>
+            <span class="sync-desc">Download the latest release and restart</span>
+          </div>
+          <button class="btn btn-primary" onclick={triggerUpdate} disabled={updating}>
+            {updating ? 'Updating...' : 'Check for Updates'}
+          </button>
+        </div>
+      </div>
+      {#if updateMessage}
+        <div class="sync-message" class:error={updateError}>
+          {updateMessage}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>

@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -594,6 +595,111 @@ func main() {
 				})
 			})
 		})
+
+		// Auto-update: download latest binary from GitHub releases and restart
+			r.Post("/api/update", func(w http.ResponseWriter, r *http.Request) {
+				execPath, err := os.Executable()
+				if err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": "Cannot determine executable path"})
+					return
+				}
+
+				goos := runtime.GOOS
+				goarch := runtime.GOARCH
+
+				downloadURL := fmt.Sprintf("https://github.com/OmniusRepos/omnius-releases/releases/latest/download/omnius-%s-%s", goos, goarch)
+
+				client := &http.Client{Timeout: 120 * time.Second}
+				resp, err := client.Get(downloadURL)
+				if err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": "Failed to download update: " + err.Error()})
+					return
+				}
+				defer resp.Body.Close()
+
+				if resp.StatusCode != http.StatusOK {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Download failed with status: %d", resp.StatusCode)})
+					return
+				}
+
+				tmpFile, err := os.CreateTemp("", "omnius-update-*")
+				if err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create temp file"})
+					return
+				}
+				tmpPath := tmpFile.Name()
+
+				if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+					tmpFile.Close()
+					os.Remove(tmpPath)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": "Failed to write update"})
+					return
+				}
+				tmpFile.Close()
+
+				if err := os.Chmod(tmpPath, 0755); err != nil {
+					os.Remove(tmpPath)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": "Failed to set permissions"})
+					return
+				}
+
+				// Replace binary
+				if err := os.Rename(tmpPath, execPath); err != nil {
+					// Cross-device fallback: copy instead
+					srcFile, openErr := os.Open(tmpPath)
+					if openErr != nil {
+						os.Remove(tmpPath)
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusInternalServerError)
+						json.NewEncoder(w).Encode(map[string]string{"error": "Failed to open temp file"})
+						return
+					}
+					defer srcFile.Close()
+
+					dstFile, createErr := os.Create(execPath)
+					if createErr != nil {
+						os.Remove(tmpPath)
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusInternalServerError)
+						json.NewEncoder(w).Encode(map[string]string{"error": "Failed to replace binary"})
+						return
+					}
+					defer dstFile.Close()
+
+					if _, copyErr := io.Copy(dstFile, srcFile); copyErr != nil {
+						os.Remove(tmpPath)
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusInternalServerError)
+						json.NewEncoder(w).Encode(map[string]string{"error": "Failed to write binary"})
+						return
+					}
+					os.Remove(tmpPath)
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":  "updated",
+					"message": "Update complete. Restarting...",
+				})
+
+				// Exit after response — Docker/systemd will restart with new binary
+				go func() {
+					time.Sleep(500 * time.Millisecond)
+					os.Exit(0)
+				}()
+			})
 
 		// Serve SPA - must be last to catch all other routes
 		r.Get("/*", serveSPA)
