@@ -13,11 +13,13 @@
     startHealthCheck,
     getHealthCheckStatus,
     clearBlocklist,
+    getLicenseStatus,
     type Channel,
     type ChannelCountry,
     type ChannelCategory,
   } from '../lib/api/client';
 
+  let notFound = false;
   let channels: Channel[] = [];
   let countries: ChannelCountry[] = [];
   let categories: ChannelCategory[] = [];
@@ -65,6 +67,19 @@
   $: totalPages = Math.ceil(total / limit);
 
   onMount(async () => {
+    try {
+      const data = await getLicenseStatus();
+      const features: string[] = data.features || [];
+      if (!features.includes('live_channels')) {
+        notFound = true;
+        loading = false;
+        return;
+      }
+    } catch {
+      notFound = true;
+      loading = false;
+      return;
+    }
     await Promise.all([loadChannels(), loadFilters(), loadStats(), checkSyncStatus(), loadSettings(), checkHealthStatus()]);
   });
 
@@ -310,6 +325,12 @@
   }
 </script>
 
+{#if notFound}
+<div class="not-found">
+  <h1>404</h1>
+  <p>Page not found</p>
+</div>
+{:else}
 <div class="channels-page">
   <header class="page-header">
     <h1 class="page-title">LIVE CHANNELS</h1>
@@ -613,8 +634,30 @@
     </div>
   </div>
 {/if}
+{/if}
 
 <style>
+  .not-found {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    color: var(--text-muted);
+  }
+
+  .not-found h1 {
+    font-size: 72px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+  }
+
+  .not-found p {
+    font-size: 18px;
+    margin-top: 8px;
+  }
+
   .channels-page {
     padding: 0;
   }
