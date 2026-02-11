@@ -644,6 +644,14 @@ func main() {
 
 		// Check for updates via GitHub releases API
 		r.Get("/api/check-update", func(w http.ResponseWriter, rq *http.Request) {
+			// Detect Docker: check for /.dockerenv or /run/.containerenv
+			isDocker := false
+			if _, err := os.Stat("/.dockerenv"); err == nil {
+				isDocker = true
+			} else if _, err := os.Stat("/run/.containerenv"); err == nil {
+				isDocker = true
+			}
+
 			client := &http.Client{Timeout: 10 * time.Second}
 			resp, err := client.Get("https://api.github.com/repos/OmniusRepos/omnius-releases/releases/latest")
 			if err != nil {
@@ -659,6 +667,7 @@ func main() {
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"update_available": false,
 					"current_version":  Version,
+					"is_docker":        isDocker,
 					"message":          "Could not check for updates",
 				})
 				return
@@ -674,6 +683,7 @@ func main() {
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"update_available": false,
 					"current_version":  Version,
+					"is_docker":        isDocker,
 				})
 				return
 			}
@@ -688,6 +698,7 @@ func main() {
 				"latest_version":   latestVersion,
 				"published_at":     release.PublishedAt,
 				"release_notes":    release.Body,
+				"is_docker":        isDocker,
 			})
 		})
 

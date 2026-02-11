@@ -42,6 +42,7 @@
     latest_version?: string;
     published_at?: string;
     release_notes?: string;
+    is_docker?: boolean;
   } | null>(null);
 
   // Feature check
@@ -641,10 +642,17 @@
               {#if updateInfo.release_notes}
                 <span class="sync-desc" style="margin-top: 4px; white-space: pre-line;">{updateInfo.release_notes}</span>
               {/if}
+              {#if updateInfo.is_docker}
+                <span class="sync-desc" style="margin-top: 8px; color: var(--accent-yellow, #f59e0b);">
+                  Running in Docker — redeploy the container to update. Use <code>bp deploy</code> or pull the latest image.
+                </span>
+              {/if}
             </div>
-            <button class="btn btn-primary" onclick={triggerUpdate} disabled={updating}>
-              {updating ? 'Updating...' : 'Install Update'}
-            </button>
+            {#if !updateInfo.is_docker}
+              <button class="btn btn-primary" onclick={triggerUpdate} disabled={updating}>
+                {updating ? 'Updating...' : 'Install Update'}
+              </button>
+            {/if}
           </div>
         </div>
       {/if}
