@@ -15,20 +15,15 @@
   import Curated from './routes/Curated.svelte';
   import ApiDocs from './routes/ApiDocs.svelte';
   import Settings from './routes/Settings.svelte';
-  import Licenses from './routes/Licenses.svelte';
 
   let isAuthenticated = $state(false);
   let checkingAuth = $state(true);
-  let licenseFeatures: string[] = $state([]);
 
   // Check if user is already authenticated
   async function checkAuth() {
     try {
       const response = await fetch('/admin/api/auth/check');
       isAuthenticated = response.ok;
-      if (isAuthenticated) {
-        loadLicenseFeatures();
-      }
     } catch (e) {
       console.error('Auth check failed - backend may not be running:', e);
       isAuthenticated = false;
@@ -36,24 +31,11 @@
     checkingAuth = false;
   }
 
-  async function loadLicenseFeatures() {
-    try {
-      const res = await fetch('/admin/api/license-status');
-      if (res.ok) {
-        const data = await res.json();
-        licenseFeatures = data.status?.features || [];
-      }
-    } catch (e) {
-      console.error('Failed to load license features:', e);
-    }
-  }
-
   // Check auth on mount
   checkAuth();
 
   function handleLogin() {
     isAuthenticated = true;
-    loadLicenseFeatures();
   }
 
   const routes = {
@@ -66,7 +48,6 @@
     '/tvshows/:id': TVShowDetail,
     '/channels': Channels,
     '/curated': Curated,
-    '/licenses': Licenses,
     '/api-docs': ApiDocs,
     '/settings': Settings,
   };
@@ -80,7 +61,7 @@
   <Login on:login={handleLogin} />
 {:else}
   <div class="app-layout">
-    <Sidebar features={licenseFeatures} />
+    <Sidebar />
     <main class="main-content">
       <Router {routes} />
     </main>

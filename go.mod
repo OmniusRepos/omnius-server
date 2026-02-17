@@ -5,7 +5,6 @@ go 1.24.0
 require (
 	github.com/anacrolix/torrent v1.56.1
 	github.com/go-chi/chi/v5 v5.0.12
-	github.com/google/uuid v1.6.0
 	modernc.org/sqlite v1.29.5
 )
 
@@ -41,6 +40,7 @@ require (
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/btree v1.1.2 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/huandu/xstrings v1.3.2 // indirect

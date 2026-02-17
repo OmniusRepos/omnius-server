@@ -6,16 +6,9 @@
   const version = '1.0.0';
   const commit = 'abc212';
 
-  interface Props {
-    features?: string[];
-  }
-
-  let { features = [] }: Props = $props();
-
   interface NavItem {
     path: string;
     label: string;
-    feature?: string;
   }
 
   const mainNav: NavItem[] = [
@@ -23,18 +16,15 @@
     { path: '/analytics', label: 'Analytics' },
   ];
 
-  const allContentNav: NavItem[] = [
+  const contentNav: NavItem[] = [
     { path: '/home', label: 'Home Sections' },
     { path: '/movies', label: 'Movies' },
     { path: '/tvshows', label: 'TV Shows' },
-    { path: '/channels', label: 'Live Channels', feature: 'live_channels' },
+    { path: '/channels', label: 'Live Channels' },
     { path: '/curated', label: 'Curated Lists' },
   ];
 
-  let contentNav = $derived(allContentNav.filter(item => !item.feature || features.includes(item.feature)));
-
   const bottomNav: NavItem[] = [
-    { path: '/licenses', label: 'Licenses' },
     { path: '/api-docs', label: 'API Docs' },
     { path: '/settings', label: 'Settings' },
   ];
@@ -151,12 +141,7 @@
           class="nav-item"
           class:active={isActive(item.path, $location)}
         >
-          {#if item.path === '/licenses'}
-            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-          {:else if item.path === '/api-docs'}
+          {#if item.path === '/api-docs'}
             <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>

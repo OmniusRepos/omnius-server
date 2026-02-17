@@ -104,27 +104,6 @@ func main() {
 	// Initialize OMDB service
 	omdbService := services.NewOMDBService(cfg.OmdbAPIKey)
 
-	// --- License System ---
-	// Always runs as client — omnius.stream is the sole license authority
-	fingerprint, err := services.GetMachineFingerprint()
-	if err != nil {
-		log.Printf("[License] Warning: failed to get machine fingerprint: %v", err)
-		fingerprint = "unknown"
-	}
-	// Use env var, fallback to persisted key file
-	licenseKey := cfg.LicenseKey
-	if licenseKey == "" {
-		if saved, err := os.ReadFile("data/.license-key"); err == nil {
-			licenseKey = strings.TrimSpace(string(saved))
-		}
-	}
-	licenseClient := services.NewLicenseClient(licenseKey, cfg.LicenseServerURL, fingerprint, "1.0.0", cfg.ServerDomain)
-	if err := licenseClient.Start(); err != nil {
-		log.Fatalf("[License] %v", err)
-	}
-	defer licenseClient.Stop()
-	log.Printf("[License] Status: %s", licenseClient.GetStatus().Message)
-
 	// Create subtitles directory
 	subtitlesDir := "data/subtitles"
 	if err := os.MkdirAll(subtitlesDir, 0755); err != nil {
@@ -173,15 +152,6 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 	r.Use(corsMiddleware)
-
-	// License enforcement middleware (client mode only)
-	if licenseClient != nil {
-		licenseMw := authMiddleware.NewLicenseMiddleware(licenseClient)
-		r.Use(licenseMw.EnforceValid)
-		r.Use(licenseMw.EnforceLiveChannels)
-		demoLimiter := authMiddleware.NewDemoLimiter(licenseClient)
-		r.Use(demoLimiter.InjectDemoFlag)
-	}
 
 	// Health check
 	r.Get("/health", streamHandler.Health)
@@ -511,52 +481,6 @@ func main() {
 				})
 			})
 
-			// License management — single license for this server
-			r.Get("/api/license-status", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				hostname, _ := os.Hostname()
-				status := licenseClient.GetStatus()
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"status":      status,
-					"fingerprint": licenseClient.GetFingerprint(),
-					"hostname":    hostname,
-					"domain":      r.Host,
-					"server_url":  cfg.LicenseServerURL,
-				})
-			})
-
-			r.Post("/api/license-activate", func(w http.ResponseWriter, r *http.Request) {
-				var body struct {
-					LicenseKey string `json:"license_key"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.LicenseKey == "" {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusBadRequest)
-					json.NewEncoder(w).Encode(map[string]string{"error": "license_key is required"})
-					return
-				}
-
-				key := strings.TrimSpace(body.LicenseKey)
-				if err := licenseClient.Restart(key); err != nil {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusUnprocessableEntity)
-					json.NewEncoder(w).Encode(map[string]interface{}{
-						"error":  err.Error(),
-						"status": licenseClient.GetStatus(),
-					})
-					return
-				}
-
-				hostname, _ := os.Hostname()
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"status":      licenseClient.GetStatus(),
-					"fingerprint": licenseClient.GetFingerprint(),
-					"hostname":    hostname,
-					"domain":      r.Host,
-				})
-			})
-
 			// YTS Mirror settings
 			r.Get("/api/settings/yts", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -832,9 +756,6 @@ func main() {
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 		log.Println("Shutting down...")
-		if licenseClient != nil {
-			licenseClient.Stop()
-		}
 		torrentService.Close()
 		db.Close()
 		os.Exit(0)

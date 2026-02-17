@@ -523,12 +523,6 @@ export async function syncSubtitles(imdbCode: string, languages = 'en,sq,es,fr,d
   });
 }
 
-// License (no longer used — license management is in Licenses.svelte directly)
-
-export async function getLicenseStatus() {
-  return request<LicenseStatus>(`${API_BASE}/license-status`);
-}
-
 // Auth
 export async function logout() {
   window.location.href = '/admin/logout';
