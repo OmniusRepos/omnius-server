@@ -517,6 +517,95 @@ func main() {
 				})
 			})
 
+			// Sync Latest Movies (from IMDB, mark as coming_soon if no torrents)
+			r.Post("/api/imdb/sync-latest", func(w http.ResponseWriter, rq *http.Request) {
+				client := &http.Client{Timeout: 30 * time.Second}
+				currentYear := time.Now().Year()
+
+				imported := 0
+				comingSoon := 0
+				skipped := 0
+				var syncErrors []string
+				pageToken := ""
+				targetCount := 50
+
+				for imported+comingSoon+skipped < targetCount {
+					apiURL := fmt.Sprintf("%s/titles?types=MOVIE&sortBy=SORT_BY_RELEASE_DATE&sortOrder=DESC&startYear=%d&minVoteCount=1000", imdbAPIBaseURL, currentYear-1)
+					if pageToken != "" {
+						apiURL += "&pageToken=" + url.QueryEscape(pageToken)
+					}
+
+					resp, err := client.Get(apiURL)
+					if err != nil {
+						log.Printf("[SyncLatest] API error: %v", err)
+						break
+					}
+
+					var imdbResp struct {
+						Titles []struct {
+							ID           string `json:"id"`
+							PrimaryTitle string `json:"primaryTitle"`
+							StartYear    int    `json:"startYear"`
+						} `json:"titles"`
+						NextPageToken string `json:"nextPageToken"`
+					}
+					if err := json.NewDecoder(resp.Body).Decode(&imdbResp); err != nil {
+						resp.Body.Close()
+						log.Printf("[SyncLatest] Decode error: %v", err)
+						break
+					}
+					resp.Body.Close()
+
+					if len(imdbResp.Titles) == 0 {
+						break
+					}
+
+					for _, t := range imdbResp.Titles {
+						if imported+comingSoon+skipped >= targetCount {
+							break
+						}
+						if t.ID == "" {
+							skipped++
+							continue
+						}
+						existing, _ := db.GetMovieByIMDB(t.ID)
+						if existing != nil {
+							skipped++
+							continue
+						}
+						movie, err := syncService.SyncMovie(t.ID)
+						if err != nil {
+							log.Printf("[SyncLatest] Failed to sync %s (%s): %v", t.PrimaryTitle, t.ID, err)
+							syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", t.PrimaryTitle, err))
+							skipped++
+							continue
+						}
+						// Check if movie got any torrents — if not, mark as coming_soon
+						if len(movie.Torrents) == 0 {
+							movie.Status = "coming_soon"
+							db.UpdateMovie(movie)
+							comingSoon++
+						} else {
+							imported++
+						}
+					}
+
+					if imdbResp.NextPageToken == "" {
+						break
+					}
+					pageToken = imdbResp.NextPageToken
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":      "ok",
+					"imported":    imported,
+					"coming_soon": comingSoon,
+					"skipped":     skipped,
+					"errors":      syncErrors,
+				})
+			})
+
 			// Sync/Refresh admin API
 			r.Post("/api/refresh_all_movies", ratingsHandler.RefreshAllMovies)
 			r.Post("/api/refresh_all_series", ratingsHandler.RefreshAllSeries)

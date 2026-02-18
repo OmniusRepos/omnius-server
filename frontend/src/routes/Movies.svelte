@@ -317,10 +317,11 @@
     }
   }
 
-  // Sync featured / top 250
+  // Sync featured / top 250 / latest
   let syncingFeatured = false;
   let syncingTop250 = false;
-  let syncResult: {type: string, imported: number, skipped: number, total?: number} | null = null;
+  let syncingLatest = false;
+  let syncResult: {type: string, imported: number, skipped: number, comingSoon?: number, total?: number} | null = null;
 
   async function syncYTSFeatured() {
     syncingFeatured = true;
@@ -357,6 +358,25 @@
       console.error('Failed to sync top 250:', err);
     } finally {
       syncingTop250 = false;
+    }
+  }
+
+  async function syncLatest() {
+    syncingLatest = true;
+    syncResult = null;
+    try {
+      const res = await fetch('/admin/api/imdb/sync-latest', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        syncResult = { type: 'Latest Movies', imported: data.imported, skipped: data.skipped, comingSoon: data.coming_soon };
+        if (data.imported > 0 || data.coming_soon > 0) {
+          loadMovies();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync latest:', err);
+    } finally {
+      syncingLatest = false;
     }
   }
 
@@ -655,11 +675,14 @@
           on:keydown={(e) => e.key === 'Enter' && handleSearch()}
         />
       </div>
-      <button class="btn btn-secondary" on:click={syncYTSFeatured} disabled={syncingFeatured || syncingTop250}>
-        {syncingFeatured ? 'SYNCING...' : 'SYNC YTS FEATURED'}
+      <button class="btn btn-secondary" on:click={syncYTSFeatured} disabled={syncingFeatured || syncingTop250 || syncingLatest}>
+        {syncingFeatured ? 'SYNCING...' : 'YTS FEATURED'}
       </button>
-      <button class="btn btn-secondary" on:click={syncIMDBTop250} disabled={syncingTop250 || syncingFeatured}>
-        {syncingTop250 ? 'SYNCING...' : 'SYNC IMDB TOP 250'}
+      <button class="btn btn-secondary" on:click={syncIMDBTop250} disabled={syncingTop250 || syncingFeatured || syncingLatest}>
+        {syncingTop250 ? 'SYNCING...' : 'IMDB TOP 250'}
+      </button>
+      <button class="btn btn-secondary" on:click={syncLatest} disabled={syncingLatest || syncingFeatured || syncingTop250}>
+        {syncingLatest ? 'SYNCING...' : 'LATEST MOVIES'}
       </button>
       <button class="btn btn-primary" on:click={openAddModal}>ADD</button>
     </div>
@@ -668,6 +691,9 @@
   {#if syncResult}
     <div class="sync-result">
       Imported {syncResult.imported} new movie{syncResult.imported !== 1 ? 's' : ''} from {syncResult.type}
+      {#if syncResult.comingSoon}
+        + {syncResult.comingSoon} as coming soon
+      {/if}
       ({syncResult.skipped} already in library)
       <button class="btn-dismiss" on:click={() => syncResult = null}>&times;</button>
     </div>
