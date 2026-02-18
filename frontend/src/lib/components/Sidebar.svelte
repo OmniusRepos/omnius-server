@@ -1,10 +1,22 @@
 <script lang="ts">
   import { link } from 'svelte-spa-router';
   import { location } from 'svelte-spa-router';
+  import { onMount } from 'svelte';
   import Logo from './Logo.svelte';
 
-  const version = '1.0.0';
-  const commit = 'abc212';
+  let version = $state('...');
+  let commit = $state('');
+
+  onMount(async () => {
+    try {
+      const res = await fetch('/admin/api/version');
+      if (res.ok) {
+        const data = await res.json();
+        version = data.version || 'unknown';
+        commit = data.commit ? data.commit.slice(0, 7) : '';
+      }
+    } catch {}
+  });
 
   interface NavItem {
     path: string;
@@ -169,7 +181,7 @@
     </div>
 
     <div class="version">
-      version: {version} | commit: {commit}
+      v{version}{commit ? ` | ${commit}` : ''}
     </div>
   </div>
 </aside>

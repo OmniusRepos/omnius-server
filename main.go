@@ -482,6 +482,15 @@ func main() {
 				})
 			})
 
+			// Version endpoint
+			r.Get("/api/version", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"version": Version,
+					"commit":  Commit,
+				})
+			})
+
 			// YTS Mirror settings
 			r.Get("/api/settings/yts", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -733,10 +742,11 @@ func main() {
 					f.Flush()
 				}
 
-				// Exit after response — Docker/systemd will restart with new binary
+				// Re-exec the new binary in place (keeps container alive in Docker)
 				go func() {
 					time.Sleep(2 * time.Second)
-					os.Exit(0)
+					execPath, _ := os.Executable()
+					syscall.Exec(execPath, os.Args, os.Environ())
 				}()
 			})
 
