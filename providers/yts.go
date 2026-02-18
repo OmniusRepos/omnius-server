@@ -6,7 +6,21 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
+
+var ytsTrackers = []string{
+	"udp://tracker.opentrackr.org:1337/announce",
+	"udp://tracker.torrent.eu.org:451/announce",
+	"udp://tracker.dler.org:6969/announce",
+	"udp://open.stealth.si:80/announce",
+	"udp://open.demonii.com:1337/announce",
+	"https://tracker.moeblog.cn:443/announce",
+	"udp://open.dstud.io:6969/announce",
+	"udp://tracker.srv00.com:6969/announce",
+	"https://tracker.zhuqiy.com:443/announce",
+	"https://tracker.pmman.tech:443/announce",
+}
 
 type YTSProvider struct {
 	baseURL string
@@ -76,7 +90,7 @@ func (p *YTSProvider) SearchMovie(title string, year int) ([]TorrentResult, erro
 			results = append(results, TorrentResult{
 				Title:     fmt.Sprintf("%s (%d) - %s", movie.Title, movie.Year, t.Quality),
 				Hash:      t.Hash,
-				MagnetURL: fmt.Sprintf("magnet:?xt=urn:btih:%s", t.Hash),
+				MagnetURL: buildMagnetURL(t.Hash, fmt.Sprintf("%s (%d) [%s] [YTS.MX]", movie.Title, movie.Year, t.Quality)),
 				Quality:   t.Quality,
 				Type:      t.Type,
 				Seeds:     uint(t.Seeds),
@@ -94,4 +108,17 @@ func (p *YTSProvider) SearchMovie(title string, year int) ([]TorrentResult, erro
 func (p *YTSProvider) SearchSeries(title string, season, episode int) ([]TorrentResult, error) {
 	// YTS doesn't support series
 	return nil, fmt.Errorf("YTS does not support series")
+}
+
+func buildMagnetURL(hash, name string) string {
+	var b strings.Builder
+	b.WriteString("magnet:?xt=urn:btih:")
+	b.WriteString(hash)
+	b.WriteString("&dn=")
+	b.WriteString(url.QueryEscape(name))
+	for _, tracker := range ytsTrackers {
+		b.WriteString("&tr=")
+		b.WriteString(url.QueryEscape(tracker))
+	}
+	return b.String()
 }

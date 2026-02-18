@@ -372,6 +372,70 @@ func main() {
 			r.Delete("/api/channels/blocklist", channelHandler.ClearBlocklist)
 			r.Delete("/api/channels/{id}", channelHandler.DeleteChannel)
 
+			// YTS Sync Featured
+			r.Post("/api/yts/sync-featured", func(w http.ResponseWriter, rq *http.Request) {
+				// Fetch featured movies from YTS
+				client := &http.Client{Timeout: 15 * time.Second}
+				apiURL := ytsAPIBaseURL + "/list_movies.json?sort_by=featured&limit=20"
+				resp, err := client.Get(apiURL)
+				if err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadGateway)
+					json.NewEncoder(w).Encode(map[string]string{"error": "YTS API unavailable: " + err.Error()})
+					return
+				}
+				defer resp.Body.Close()
+
+				var ytsResp struct {
+					Status string `json:"status"`
+					Data   struct {
+						Movies []struct {
+							IMDBCode string `json:"imdb_code"`
+							Title    string `json:"title"`
+							Year     int    `json:"year"`
+						} `json:"movies"`
+					} `json:"data"`
+				}
+				if err := json.NewDecoder(resp.Body).Decode(&ytsResp); err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": "Failed to parse YTS response"})
+					return
+				}
+
+				imported := 0
+				skipped := 0
+				var errors []string
+				for _, m := range ytsResp.Data.Movies {
+					if m.IMDBCode == "" {
+						skipped++
+						continue
+					}
+					// Check if already in DB
+					existing, _ := db.GetMovieByIMDB(m.IMDBCode)
+					if existing != nil {
+						skipped++
+						continue
+					}
+					_, err := syncService.SyncMovie(m.IMDBCode)
+					if err != nil {
+						log.Printf("[SyncFeatured] Failed to sync %s (%s): %v", m.Title, m.IMDBCode, err)
+						errors = append(errors, fmt.Sprintf("%s: %v", m.Title, err))
+						continue
+					}
+					imported++
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":   "ok",
+					"imported": imported,
+					"skipped":  skipped,
+					"errors":   errors,
+					"total":    len(ytsResp.Data.Movies),
+				})
+			})
+
 			// Sync/Refresh admin API
 			r.Post("/api/refresh_all_movies", ratingsHandler.RefreshAllMovies)
 			r.Post("/api/refresh_all_series", ratingsHandler.RefreshAllSeries)

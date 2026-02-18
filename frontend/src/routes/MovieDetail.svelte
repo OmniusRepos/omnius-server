@@ -72,6 +72,13 @@
     size: '',
   };
 
+  // YTS torrent search
+  let ytsTorrents: Array<{hash: string, quality: string, type: string, size: string, seeds: number, peers: number}> = [];
+  let selectedYtsTorrents: Set<string> = new Set();
+  let ytsLoading = false;
+  let ytsError = '';
+  let addingTorrents = false;
+
   onMount(async () => {
     await loadMovie();
   });
@@ -371,6 +378,92 @@
       push('/movies');
     } catch (err) {
       console.error('Failed to delete movie:', err);
+    }
+  }
+
+  async function openTorrentModal() {
+    torrentForm = { hash: '', quality: '1080p', type: 'web', size: '' };
+    ytsTorrents = [];
+    selectedYtsTorrents = new Set();
+    ytsError = '';
+    showTorrentModal = true;
+
+    // Search YTS for available torrents
+    if (movie?.imdb_code) {
+      ytsLoading = true;
+      try {
+        const res = await fetch(`/admin/api/yts/search?imdb=${encodeURIComponent(movie.imdb_code)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === 'error') {
+            ytsError = 'YTS unavailable - enter torrent manually';
+          } else {
+            const ytsMovie = data.data?.movies?.[0];
+            if (ytsMovie?.torrents) {
+              ytsTorrents = ytsMovie.torrents.map((t: any) => ({
+                hash: t.hash,
+                quality: t.quality,
+                type: t.type || 'web',
+                size: t.size,
+                seeds: t.seeds || 0,
+                peers: t.peers || 0,
+              }));
+            } else {
+              ytsError = 'No torrents found on YTS for this movie';
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to search YTS:', err);
+        ytsError = 'YTS unavailable - enter torrent manually';
+      }
+      ytsLoading = false;
+    }
+  }
+
+  function toggleYtsTorrent(hash: string) {
+    if (selectedYtsTorrents.has(hash)) {
+      selectedYtsTorrents.delete(hash);
+    } else {
+      selectedYtsTorrents.add(hash);
+    }
+    selectedYtsTorrents = selectedYtsTorrents;
+  }
+
+  function selectAllYtsTorrents() {
+    if (selectedYtsTorrents.size === ytsTorrents.length) {
+      selectedYtsTorrents = new Set();
+    } else {
+      selectedYtsTorrents = new Set(ytsTorrents.map(t => t.hash));
+    }
+  }
+
+  async function handleAddSelectedTorrents() {
+    if (!movie || selectedYtsTorrents.size === 0) return;
+    addingTorrents = true;
+    try {
+      const torrentsToAdd = ytsTorrents.filter(t => selectedYtsTorrents.has(t.hash));
+      for (const torrent of torrentsToAdd) {
+        await fetch(`/admin/movies/${movie.id}/torrent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
+          },
+          body: new URLSearchParams({
+            hash: torrent.hash,
+            quality: torrent.quality,
+            type: torrent.type,
+            size: torrent.size,
+          }),
+        });
+      }
+      showTorrentModal = false;
+      await loadMovie();
+    } catch (err) {
+      console.error('Failed to add torrents:', err);
+    } finally {
+      addingTorrents = false;
     }
   }
 
@@ -852,7 +945,7 @@
           <button class="btn btn-sm btn-secondary" on:click={handleSyncSubtitles} disabled={syncingSubtitles || !movie.imdb_code}>
             {syncingSubtitles ? 'SYNCING...' : 'SYNC SUBS'}
           </button>
-          <button class="btn btn-sm btn-primary" on:click={() => showTorrentModal = true}>ADD TORRENT</button>
+          <button class="btn btn-sm btn-primary" on:click={openTorrentModal}>ADD TORRENT</button>
         </div>
       </div>
       {#if movie.torrents && movie.torrents.length > 0}
@@ -1079,7 +1172,59 @@
 </Modal>
 
 <!-- Add Torrent Modal -->
-<Modal bind:open={showTorrentModal} title="Add Torrent" size="md" on:close={() => showTorrentModal = false}>
+<Modal bind:open={showTorrentModal} title="Add Torrent" size="lg" on:close={() => showTorrentModal = false}>
+  <!-- YTS Torrents Section -->
+  {#if movie?.imdb_code}
+    <div class="yts-section">
+      <div class="section-header">
+        <h4 class="section-title">Available on YTS</h4>
+        {#if ytsTorrents.length > 1}
+          <button type="button" class="btn btn-sm btn-secondary" on:click={selectAllYtsTorrents}>
+            {selectedYtsTorrents.size === ytsTorrents.length ? 'Deselect All' : 'Select All'}
+          </button>
+        {/if}
+      </div>
+      {#if ytsLoading}
+        <div class="loading-inline">
+          <div class="spinner-small"></div>
+          <span>Searching YTS...</span>
+        </div>
+      {:else if ytsTorrents.length > 0}
+        <div class="yts-torrents">
+          {#each ytsTorrents as torrent}
+            <label
+              class="yts-torrent-item"
+              class:selected={selectedYtsTorrents.has(torrent.hash)}
+            >
+              <input
+                type="checkbox"
+                checked={selectedYtsTorrents.has(torrent.hash)}
+                on:change={() => toggleYtsTorrent(torrent.hash)}
+              />
+              <span class="torrent-quality-badge badge-{torrent.quality}">{torrent.quality}</span>
+              <span class="yts-torrent-type">{torrent.type}</span>
+              <span class="yts-torrent-size">{torrent.size}</span>
+              <span class="torrent-seeds">🌱 {torrent.seeds}</span>
+            </label>
+          {/each}
+        </div>
+        {#if selectedYtsTorrents.size > 0}
+          <button
+            type="button"
+            class="btn btn-primary mt-3"
+            on:click={handleAddSelectedTorrents}
+            disabled={addingTorrents}
+          >
+            {addingTorrents ? 'Adding...' : `Add ${selectedYtsTorrents.size} Torrent${selectedYtsTorrents.size > 1 ? 's' : ''}`}
+          </button>
+        {/if}
+      {:else if ytsError}
+        <p class="text-muted">{ytsError}</p>
+      {/if}
+    </div>
+    <div class="divider">or enter manually</div>
+  {/if}
+
   <form on:submit|preventDefault={handleAddTorrent}>
     <div class="form-group">
       <label class="form-label" for="torrent_hash">Torrent Hash / Magnet Link *</label>
@@ -1112,7 +1257,7 @@
   </form>
   <svelte:fragment slot="footer">
     <button class="btn btn-secondary" on:click={() => showTorrentModal = false}>Cancel</button>
-    <button class="btn btn-primary" on:click={handleAddTorrent}>Add Torrent</button>
+    <button class="btn btn-primary" on:click={handleAddTorrent} disabled={!torrentForm.hash}>Add Torrent</button>
   </svelte:fragment>
 </Modal>
 
@@ -2186,5 +2331,145 @@
 
   .mt-2 {
     margin-top: 8px;
+  }
+
+  /* YTS Torrents */
+  .yts-section {
+    margin-bottom: 16px;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-secondary);
+  }
+
+  .loading-inline {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 0;
+    color: var(--text-muted);
+  }
+
+  .spinner-small {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .yts-torrents {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .yts-torrent-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text-primary);
+    font-size: 13px;
+  }
+
+  .yts-torrent-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent-green, #22c55e);
+    cursor: pointer;
+  }
+
+  .yts-torrent-item:hover {
+    border-color: var(--accent-blue);
+    background: var(--bg-secondary);
+  }
+
+  .yts-torrent-item.selected {
+    border-color: var(--accent-green, #22c55e);
+    background: rgba(34, 197, 94, 0.1);
+  }
+
+  .torrent-quality-badge {
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .badge-720p {
+    background: #3b82f6;
+    color: white;
+  }
+
+  .badge-1080p {
+    background: #8b5cf6;
+    color: white;
+  }
+
+  .badge-2160p {
+    background: #f59e0b;
+    color: white;
+  }
+
+  .yts-torrent-type {
+    color: var(--text-muted);
+  }
+
+  .yts-torrent-size {
+    color: var(--text-secondary);
+  }
+
+  .torrent-seeds {
+    color: var(--accent-green, #22c55e);
+    font-weight: 500;
+  }
+
+  .mt-3 {
+    margin-top: 12px;
+  }
+
+  .divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    margin: 20px 0;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .divider::before,
+  .divider::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .divider::before {
+    margin-right: 12px;
+  }
+
+  .divider::after {
+    margin-left: 12px;
   }
 </style>

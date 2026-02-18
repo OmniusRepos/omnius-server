@@ -317,6 +317,29 @@
     }
   }
 
+  // Sync featured
+  let syncingFeatured = false;
+  let syncFeaturedResult: {imported: number, skipped: number, total: number} | null = null;
+
+  async function syncYTSFeatured() {
+    syncingFeatured = true;
+    syncFeaturedResult = null;
+    try {
+      const res = await fetch('/admin/api/yts/sync-featured', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        syncFeaturedResult = { imported: data.imported, skipped: data.skipped, total: data.total };
+        if (data.imported > 0) {
+          loadMovies();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync featured:', err);
+    } finally {
+      syncingFeatured = false;
+    }
+  }
+
   let fetchingImdb = false;
   let imdbError: string | null = null;
   let titleSuggestions: Array<{id: string, title: string, year: string, poster: string, inLibrary?: boolean, movieId?: number}> = [];
@@ -612,9 +635,20 @@
           on:keydown={(e) => e.key === 'Enter' && handleSearch()}
         />
       </div>
+      <button class="btn btn-secondary" on:click={syncYTSFeatured} disabled={syncingFeatured}>
+        {syncingFeatured ? 'SYNCING...' : 'SYNC YTS FEATURED'}
+      </button>
       <button class="btn btn-primary" on:click={openAddModal}>ADD</button>
     </div>
   </header>
+
+  {#if syncFeaturedResult}
+    <div class="sync-result">
+      Imported {syncFeaturedResult.imported} new movie{syncFeaturedResult.imported !== 1 ? 's' : ''} from YTS Featured
+      ({syncFeaturedResult.skipped} already in library)
+      <button class="btn-dismiss" on:click={() => syncFeaturedResult = null}>&times;</button>
+    </div>
+  {/if}
 
   {#if loading}
     <div class="loading">
@@ -1038,6 +1072,33 @@
 </Modal>
 
 <style>
+  .sync-result {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    border-radius: 8px;
+    color: var(--accent-green, #22c55e);
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+
+  .btn-dismiss {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+
+  .btn-dismiss:hover {
+    color: var(--text-primary);
+  }
+
   .form-error {
     color: #ef4444;
     font-size: 0.85rem;
