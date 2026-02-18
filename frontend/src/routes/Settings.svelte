@@ -36,6 +36,7 @@
   let updateInfo = $state<{
     update_available: boolean;
     current_version: string;
+    commit?: string;
     latest_version?: string;
     published_at?: string;
     release_notes?: string;
@@ -542,7 +543,7 @@
         <div class="sync-item">
           <div class="sync-info">
             <span class="sync-title">Current Version</span>
-            <span class="sync-desc">{updateInfo?.current_version || 'Unknown'}</span>
+            <span class="sync-desc">{updateInfo?.current_version || 'Unknown'}{updateInfo?.commit ? ` | commit: ${updateInfo.commit.slice(0, 7)}` : ''}</span>
           </div>
           <button class="btn btn-primary" onclick={checkForUpdates} disabled={checking || updating}>
             {checking ? 'Checking...' : 'Check for Updates'}
@@ -567,11 +568,9 @@
                 </span>
               {/if}
             </div>
-            {#if !updateInfo.is_docker}
-              <button class="btn btn-primary" onclick={triggerUpdate} disabled={updating}>
-                {updating ? 'Updating...' : 'Install Update'}
-              </button>
-            {/if}
+            <button class="btn btn-primary" onclick={triggerUpdate} disabled={updating}>
+              {updating ? 'Updating...' : 'Install Update'}
+            </button>
           </div>
         </div>
       {/if}

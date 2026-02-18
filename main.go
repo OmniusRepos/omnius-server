@@ -35,8 +35,9 @@ var templatesFS embed.FS
 //go:embed static/*
 var staticFS embed.FS
 
-// Version is set at build time via -ldflags "-X main.Version=..."
+// Version and Commit are set at build time via -ldflags "-X main.Version=... -X main.Commit=..."
 var Version = "dev"
+var Commit = ""
 
 const imdbAPIBaseURL = "https://api.imdbapi.dev"
 // YTS API URL - auto-detected from working mirrors
@@ -591,6 +592,7 @@ func main() {
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"update_available": false,
 					"current_version":  Version,
+					"commit":           Commit,
 					"is_docker":        isDocker,
 					"message":          "Could not check for updates",
 				})
@@ -607,6 +609,7 @@ func main() {
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"update_available": false,
 					"current_version":  Version,
+					"commit":           Commit,
 					"is_docker":        isDocker,
 				})
 				return
@@ -619,6 +622,7 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"update_available": hasUpdate,
 				"current_version":  Version,
+				"commit":           Commit,
 				"latest_version":   latestVersion,
 				"published_at":     release.PublishedAt,
 				"release_notes":    release.Body,
