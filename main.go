@@ -436,6 +436,87 @@ func main() {
 				})
 			})
 
+			// IMDB Top 250 Sync
+			r.Post("/api/imdb/sync-top250", func(w http.ResponseWriter, rq *http.Request) {
+				// Use the imdbapi.dev /titles endpoint sorted by rating
+				client := &http.Client{Timeout: 30 * time.Second}
+
+				imported := 0
+				skipped := 0
+				var errors []string
+				pageToken := ""
+				targetCount := 250
+
+				for imported+skipped < targetCount {
+					apiURL := fmt.Sprintf("%s/titles?types=MOVIE&sortBy=SORT_BY_USER_RATING&sortOrder=DESC&minVoteCount=25000", imdbAPIBaseURL)
+					if pageToken != "" {
+						apiURL += "&pageToken=" + url.QueryEscape(pageToken)
+					}
+
+					resp, err := client.Get(apiURL)
+					if err != nil {
+						log.Printf("[SyncTop250] API error: %v", err)
+						break
+					}
+
+					var imdbResp struct {
+						Titles []struct {
+							ID           string `json:"id"`
+							PrimaryTitle string `json:"primaryTitle"`
+							StartYear    int    `json:"startYear"`
+						} `json:"titles"`
+						NextPageToken string `json:"nextPageToken"`
+					}
+					if err := json.NewDecoder(resp.Body).Decode(&imdbResp); err != nil {
+						resp.Body.Close()
+						log.Printf("[SyncTop250] Decode error: %v", err)
+						break
+					}
+					resp.Body.Close()
+
+					if len(imdbResp.Titles) == 0 {
+						break
+					}
+
+					for _, t := range imdbResp.Titles {
+						if imported+skipped >= targetCount {
+							break
+						}
+						if t.ID == "" {
+							skipped++
+							continue
+						}
+						// Check if already in DB
+						existing, _ := db.GetMovieByIMDB(t.ID)
+						if existing != nil {
+							skipped++
+							continue
+						}
+						_, err := syncService.SyncMovie(t.ID)
+						if err != nil {
+							log.Printf("[SyncTop250] Failed to sync %s (%s): %v", t.PrimaryTitle, t.ID, err)
+							errors = append(errors, fmt.Sprintf("%s: %v", t.PrimaryTitle, err))
+							skipped++
+							continue
+						}
+						imported++
+					}
+
+					if imdbResp.NextPageToken == "" {
+						break
+					}
+					pageToken = imdbResp.NextPageToken
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":   "ok",
+					"imported": imported,
+					"skipped":  skipped,
+					"errors":   errors,
+				})
+			})
+
 			// Sync/Refresh admin API
 			r.Post("/api/refresh_all_movies", ratingsHandler.RefreshAllMovies)
 			r.Post("/api/refresh_all_series", ratingsHandler.RefreshAllSeries)

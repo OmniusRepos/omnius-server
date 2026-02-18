@@ -317,18 +317,19 @@
     }
   }
 
-  // Sync featured
+  // Sync featured / top 250
   let syncingFeatured = false;
-  let syncFeaturedResult: {imported: number, skipped: number, total: number} | null = null;
+  let syncingTop250 = false;
+  let syncResult: {type: string, imported: number, skipped: number, total?: number} | null = null;
 
   async function syncYTSFeatured() {
     syncingFeatured = true;
-    syncFeaturedResult = null;
+    syncResult = null;
     try {
       const res = await fetch('/admin/api/yts/sync-featured', { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
-        syncFeaturedResult = { imported: data.imported, skipped: data.skipped, total: data.total };
+        syncResult = { type: 'YTS Featured', imported: data.imported, skipped: data.skipped, total: data.total };
         if (data.imported > 0) {
           loadMovies();
         }
@@ -337,6 +338,25 @@
       console.error('Failed to sync featured:', err);
     } finally {
       syncingFeatured = false;
+    }
+  }
+
+  async function syncIMDBTop250() {
+    syncingTop250 = true;
+    syncResult = null;
+    try {
+      const res = await fetch('/admin/api/imdb/sync-top250', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        syncResult = { type: 'IMDB Top 250', imported: data.imported, skipped: data.skipped };
+        if (data.imported > 0) {
+          loadMovies();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync top 250:', err);
+    } finally {
+      syncingTop250 = false;
     }
   }
 
@@ -635,18 +655,21 @@
           on:keydown={(e) => e.key === 'Enter' && handleSearch()}
         />
       </div>
-      <button class="btn btn-secondary" on:click={syncYTSFeatured} disabled={syncingFeatured}>
+      <button class="btn btn-secondary" on:click={syncYTSFeatured} disabled={syncingFeatured || syncingTop250}>
         {syncingFeatured ? 'SYNCING...' : 'SYNC YTS FEATURED'}
+      </button>
+      <button class="btn btn-secondary" on:click={syncIMDBTop250} disabled={syncingTop250 || syncingFeatured}>
+        {syncingTop250 ? 'SYNCING...' : 'SYNC IMDB TOP 250'}
       </button>
       <button class="btn btn-primary" on:click={openAddModal}>ADD</button>
     </div>
   </header>
 
-  {#if syncFeaturedResult}
+  {#if syncResult}
     <div class="sync-result">
-      Imported {syncFeaturedResult.imported} new movie{syncFeaturedResult.imported !== 1 ? 's' : ''} from YTS Featured
-      ({syncFeaturedResult.skipped} already in library)
-      <button class="btn-dismiss" on:click={() => syncFeaturedResult = null}>&times;</button>
+      Imported {syncResult.imported} new movie{syncResult.imported !== 1 ? 's' : ''} from {syncResult.type}
+      ({syncResult.skipped} already in library)
+      <button class="btn-dismiss" on:click={() => syncResult = null}>&times;</button>
     </div>
   {/if}
 
