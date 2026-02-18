@@ -2014,10 +2014,6 @@
     transition: opacity 0.2s;
   }
 
-  .franchise-movie.suggested:hover .add-franchise-btn {
-    opacity: 1;
-  }
-
   /* Franchise Modal */
   .franchise-modal {
     min-height: 200px;

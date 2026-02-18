@@ -375,9 +375,10 @@
 
   <!-- M3U Source Setting -->
   <div class="m3u-setting">
-    <label class="m3u-label">M3U Source URL</label>
+    <label class="m3u-label" for="m3u-url-input">M3U Source URL</label>
     <div class="m3u-input-row">
       <input
+        id="m3u-url-input"
         type="text"
         class="form-input m3u-input"
         placeholder="https://iptv-org.github.io/iptv/index.m3u"
@@ -396,7 +397,7 @@
   <div class="health-section">
     <div class="health-header">
       <div>
-        <label class="m3u-label">Stream Health Check</label>
+        <span class="m3u-label">Stream Health Check</span>
         <span class="health-subtitle">Check all streams and blocklist dead channels</span>
       </div>
       <div class="health-actions">
@@ -588,7 +589,9 @@
 
 <!-- Delete Confirmation -->
 {#if showDeleteConfirm && channelToDelete}
-  <div class="modal-backdrop" on:click={() => showDeleteConfirm = false} on:keydown={(e) => e.key === 'Escape' && (showDeleteConfirm = false)}>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="modal-backdrop" role="dialog" aria-modal="true" tabindex="-1" on:click={() => showDeleteConfirm = false} on:keydown={(e) => e.key === 'Escape' && (showDeleteConfirm = false)}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-content" on:click|stopPropagation on:keydown|stopPropagation>
       <h3>Delete Channel</h3>
       <p>Are you sure you want to delete <strong>{channelToDelete.name}</strong>?</p>
@@ -602,7 +605,9 @@
 
 <!-- Clear Blocklist Confirmation -->
 {#if showClearBlocklistConfirm}
-  <div class="modal-backdrop" on:click={() => showClearBlocklistConfirm = false} on:keydown={(e) => e.key === 'Escape' && (showClearBlocklistConfirm = false)}>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="modal-backdrop" role="dialog" aria-modal="true" tabindex="-1" on:click={() => showClearBlocklistConfirm = false} on:keydown={(e) => e.key === 'Escape' && (showClearBlocklistConfirm = false)}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-content" on:click|stopPropagation on:keydown|stopPropagation>
       <h3>Clear Blocklist</h3>
       <p>This will remove all {stats.blocklisted} entries from the blocklist. Previously dead channels may reappear on the next sync.</p>

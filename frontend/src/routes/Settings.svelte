@@ -304,6 +304,7 @@
                 class="toggle-btn"
                 class:active={service.enabled}
                 onclick={() => toggleService(service.id)}
+                aria-label="Toggle {service.id}"
               >
                 <span class="toggle-knob"></span>
               </button>
