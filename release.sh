@@ -3,7 +3,7 @@ set -e
 
 # Release script for Omnius Server
 # Usage: ./release.sh [version]  - specify version like 2.2.0
-#        ./release.sh            - auto-increment patch version
+#        ./release.sh            - auto-increment patch (e.g. 2.1.0 → 2.1.1)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"

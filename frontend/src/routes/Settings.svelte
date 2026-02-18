@@ -44,8 +44,22 @@
   } | null>(null);
 
   onMount(async () => {
-    await Promise.all([loadYTSSettings(), loadServices()]);
+    await Promise.all([loadYTSSettings(), loadServices(), loadVersion()]);
   });
+
+  async function loadVersion() {
+    try {
+      const res = await fetch('/admin/api/version');
+      if (res.ok) {
+        const data = await res.json();
+        updateInfo = {
+          update_available: false,
+          current_version: data.version || 'unknown',
+          commit: data.commit || '',
+        };
+      }
+    } catch {}
+  }
 
   async function loadServices() {
     try {
