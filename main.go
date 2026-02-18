@@ -606,6 +606,18 @@ func main() {
 				})
 			})
 
+			// Scan all movies for new YTS torrents
+			r.Post("/api/yts/scan-torrents", func(w http.ResponseWriter, rq *http.Request) {
+				scanned, added, skipped := syncService.ScanAllMovieTorrents()
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":  "ok",
+					"scanned": scanned,
+					"added":   added,
+					"skipped": skipped,
+				})
+			})
+
 			// Sync/Refresh admin API
 			r.Post("/api/refresh_all_movies", ratingsHandler.RefreshAllMovies)
 			r.Post("/api/refresh_all_series", ratingsHandler.RefreshAllSeries)

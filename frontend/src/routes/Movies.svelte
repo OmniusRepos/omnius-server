@@ -317,11 +317,12 @@
     }
   }
 
-  // Sync featured / top 250 / latest
+  // Sync featured / top 250 / latest / scan torrents
   let syncingFeatured = false;
   let syncingTop250 = false;
   let syncingLatest = false;
-  let syncResult: {type: string, imported: number, skipped: number, comingSoon?: number, total?: number} | null = null;
+  let scanningTorrents = false;
+  let syncResult: {type: string, imported: number, skipped: number, comingSoon?: number, added?: number, scanned?: number, total?: number} | null = null;
 
   async function syncYTSFeatured() {
     syncingFeatured = true;
@@ -377,6 +378,25 @@
       console.error('Failed to sync latest:', err);
     } finally {
       syncingLatest = false;
+    }
+  }
+
+  async function scanYTSTorrents() {
+    scanningTorrents = true;
+    syncResult = null;
+    try {
+      const res = await fetch('/admin/api/yts/scan-torrents', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        syncResult = { type: 'YTS Torrent Scan', imported: 0, skipped: data.skipped, added: data.added, scanned: data.scanned };
+        if (data.added > 0) {
+          loadMovies();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to scan torrents:', err);
+    } finally {
+      scanningTorrents = false;
     }
   }
 
@@ -675,14 +695,17 @@
           on:keydown={(e) => e.key === 'Enter' && handleSearch()}
         />
       </div>
-      <button class="btn btn-secondary" on:click={syncYTSFeatured} disabled={syncingFeatured || syncingTop250 || syncingLatest}>
+      <button class="btn btn-secondary" on:click={syncYTSFeatured} disabled={syncingFeatured || syncingTop250 || syncingLatest || scanningTorrents}>
         {syncingFeatured ? 'SYNCING...' : 'YTS FEATURED'}
       </button>
-      <button class="btn btn-secondary" on:click={syncIMDBTop250} disabled={syncingTop250 || syncingFeatured || syncingLatest}>
+      <button class="btn btn-secondary" on:click={syncIMDBTop250} disabled={syncingTop250 || syncingFeatured || syncingLatest || scanningTorrents}>
         {syncingTop250 ? 'SYNCING...' : 'IMDB TOP 250'}
       </button>
-      <button class="btn btn-secondary" on:click={syncLatest} disabled={syncingLatest || syncingFeatured || syncingTop250}>
+      <button class="btn btn-secondary" on:click={syncLatest} disabled={syncingLatest || syncingFeatured || syncingTop250 || scanningTorrents}>
         {syncingLatest ? 'SYNCING...' : 'LATEST MOVIES'}
+      </button>
+      <button class="btn btn-secondary" on:click={scanYTSTorrents} disabled={scanningTorrents || syncingFeatured || syncingTop250 || syncingLatest}>
+        {scanningTorrents ? 'SCANNING...' : 'SCAN TORRENTS'}
       </button>
       <button class="btn btn-primary" on:click={openAddModal}>ADD</button>
     </div>
@@ -690,11 +713,15 @@
 
   {#if syncResult}
     <div class="sync-result">
-      Imported {syncResult.imported} new movie{syncResult.imported !== 1 ? 's' : ''} from {syncResult.type}
-      {#if syncResult.comingSoon}
-        + {syncResult.comingSoon} as coming soon
+      {#if syncResult.added !== undefined}
+        Scanned {syncResult.scanned} movies, found {syncResult.added} new torrent{syncResult.added !== 1 ? 's' : ''}
+      {:else}
+        Imported {syncResult.imported} new movie{syncResult.imported !== 1 ? 's' : ''} from {syncResult.type}
+        {#if syncResult.comingSoon}
+          + {syncResult.comingSoon} as coming soon
+        {/if}
+        ({syncResult.skipped} already in library)
       {/if}
-      ({syncResult.skipped} already in library)
       <button class="btn-dismiss" on:click={() => syncResult = null}>&times;</button>
     </div>
   {/if}

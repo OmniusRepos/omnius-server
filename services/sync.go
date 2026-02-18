@@ -104,6 +104,52 @@ func (s *SyncService) SyncMovie(imdbCode string) (*models.Movie, error) {
 	return movie, nil
 }
 
+// ScanAllMovieTorrents checks YTS for new torrents for all movies in the DB
+func (s *SyncService) ScanAllMovieTorrents() (scanned, added, skipped int) {
+	movies, _, err := s.db.ListMovies(database.MovieFilter{Limit: 10000})
+	if err != nil {
+		log.Printf("[ScanTorrents] Failed to list movies: %v", err)
+		return
+	}
+
+	total := len(movies)
+	for i, movie := range movies {
+		if movie.ImdbCode == "" {
+			skipped++
+			continue
+		}
+
+		log.Printf("[ScanTorrents] [%d/%d] Checking %s (%s)...", i+1, total, movie.Title, movie.ImdbCode)
+
+		beforeCount := len(movie.Torrents)
+		s.syncMovieTorrents(&movie)
+
+		// Re-fetch to get updated torrent count
+		updated, err := s.db.GetMovieByIMDB(movie.ImdbCode)
+		if err == nil && updated != nil {
+			newTorrents := len(updated.Torrents) - beforeCount
+			if newTorrents > 0 {
+				added += newTorrents
+				log.Printf("[ScanTorrents]   Found %d new torrent(s)", newTorrents)
+
+				// If movie was coming_soon and now has torrents, mark as available
+				if updated.Status == "coming_soon" {
+					updated.Status = "available"
+					s.db.UpdateMovie(updated)
+					log.Printf("[ScanTorrents]   Marked %s as available", movie.Title)
+				}
+			}
+		}
+		scanned++
+
+		// Rate limiting
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	log.Printf("[ScanTorrents] Done: %d scanned, %d new torrents added, %d skipped", scanned, added, skipped)
+	return
+}
+
 // RefreshAllMovies refreshes all movies in the database
 func (s *SyncService) RefreshAllMovies() {
 	log.Println("Starting refresh all movies...")
