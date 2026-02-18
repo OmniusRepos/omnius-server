@@ -577,7 +577,7 @@ func main() {
 			}
 
 			client := &http.Client{Timeout: 10 * time.Second}
-			resp, err := client.Get("https://api.github.com/repos/OmniusRepos/omnius-releases/releases/latest")
+			resp, err := client.Get("https://api.github.com/repos/OmniusRepos/omnius-server/releases/latest")
 			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadGateway)
@@ -639,7 +639,7 @@ func main() {
 				goos := runtime.GOOS
 				goarch := runtime.GOARCH
 
-				downloadURL := fmt.Sprintf("https://github.com/OmniusRepos/omnius-releases/releases/latest/download/omnius-%s-%s", goos, goarch)
+				downloadURL := fmt.Sprintf("https://github.com/OmniusRepos/omnius-server/releases/latest/download/omnius-%s-%s", goos, goarch)
 
 				client := &http.Client{Timeout: 120 * time.Second}
 				resp, err := client.Get(downloadURL)
