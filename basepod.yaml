@@ -3,9 +3,7 @@ server: bp.common.al
 port: 8080
 domains:
   - api.omnius.lol
-build:
-  dockerfile: Dockerfile
-  context: .
+image: ghcr.io/omniusrepos/omnius-server:latest
 env:
   LICENSE_SERVER_URL: "https://omnius.stream"
   LICENSE_KEY: "OMNI-LIVE-EBME-AVUZ"
