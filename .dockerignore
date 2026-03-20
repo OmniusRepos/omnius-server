@@ -7,3 +7,5 @@ data/.license-cache.json
 data/subtitles/
 frontend/node_modules/
 .git/
+.loom/
+torrent-server
