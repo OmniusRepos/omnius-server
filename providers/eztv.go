@@ -34,9 +34,22 @@ type eztvTorrent struct {
 	SmallScreenshot string `json:"small_screenshot"`
 }
 
+// EZTVBaseURL is the current working EZTV API base URL (auto-detected from mirrors)
+var EZTVBaseURL = "https://eztvx.to/api"
+
+// EZTVMirrors is the list of EZTV mirrors to try
+var EZTVMirrors = []string{
+	"https://eztvx.to/api",
+	"https://eztv.re/api",
+	"https://eztv.ag/api",
+	"https://eztv.it/api",
+	"https://eztv.ch/api",
+	"https://eztv.li/api",
+}
+
 func NewEZTVProvider() *EZTVProvider {
 	return &EZTVProvider{
-		baseURL: "https://eztvx.to/api",
+		baseURL: EZTVBaseURL,
 	}
 }
 
@@ -221,7 +234,7 @@ func FetchEZTVTorrents(imdbID string) ([]EZTVSeriesResult, error) {
 	for page := 1; page <= 5; page++ {
 		params.Set("page", strconv.Itoa(page))
 
-		resp, err := http.Get("https://eztvx.to/api/get-torrents?" + params.Encode())
+		resp, err := http.Get(EZTVBaseURL + "/get-torrents?" + params.Encode())
 		if err != nil {
 			return nil, fmt.Errorf("EZTV request failed: %w", err)
 		}

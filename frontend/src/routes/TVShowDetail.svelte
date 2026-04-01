@@ -46,6 +46,29 @@
     totalSize: '',
   };
 
+  // EZTV torrent search
+  interface EZTVResult {
+    Title: string;
+    Hash: string;
+    MagnetURL: string;
+    Quality: string;
+    Season: number;
+    Episode: number;
+    Seeds: number;
+    Peers: number;
+    Size: string;
+    SizeBytes: number;
+  }
+
+  let eztvTorrents: EZTVResult[] = [];
+  let eztvLoading = false;
+  let eztvError = '';
+  let eztvSearched = false;
+  let selectedEztvTorrents: Set<string> = new Set();
+  let addingEztvTorrents = false;
+  let showEztvModal = false;
+  let eztvSeasonFilter: number | null = null;
+
   // Form
   let seriesForm = {
     imdb_code: '',
@@ -436,6 +459,121 @@
       alert('Failed to add torrents');
     }
   }
+
+  async function openEztvModal() {
+    eztvTorrents = [];
+    selectedEztvTorrents = new Set();
+    eztvError = '';
+    eztvSearched = false;
+    eztvSeasonFilter = null;
+    showEztvModal = true;
+    await searchEztv();
+  }
+
+  async function searchEztv() {
+    if (!series?.imdb_code) return;
+    eztvLoading = true;
+    eztvError = '';
+    try {
+      const res = await fetch(`/admin/api/eztv/search?imdb=${encodeURIComponent(series.imdb_code)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'error') {
+          eztvError = 'EZTV unavailable: ' + (data.message || '');
+        } else {
+          eztvTorrents = data.torrents || [];
+          if (eztvTorrents.length === 0) {
+            eztvError = 'No torrents found on EZTV for this series';
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to search EZTV:', err);
+      eztvError = 'EZTV unavailable';
+    } finally {
+      eztvLoading = false;
+      eztvSearched = true;
+    }
+  }
+
+  function toggleEztvTorrent(hash: string) {
+    if (selectedEztvTorrents.has(hash)) {
+      selectedEztvTorrents.delete(hash);
+    } else {
+      selectedEztvTorrents.add(hash);
+    }
+    selectedEztvTorrents = selectedEztvTorrents;
+  }
+
+  function selectAllEztvTorrents() {
+    const filtered = filteredEztvTorrents;
+    if (selectedEztvTorrents.size === filtered.length && filtered.length > 0) {
+      selectedEztvTorrents = new Set();
+    } else {
+      selectedEztvTorrents = new Set(filtered.map(t => t.Hash));
+    }
+  }
+
+  $: filteredEztvTorrents = eztvSeasonFilter !== null
+    ? eztvTorrents.filter(t => t.Season === eztvSeasonFilter)
+    : eztvTorrents;
+
+  $: eztvSeasons = [...new Set(eztvTorrents.map(t => t.Season).filter(s => s > 0))].sort((a, b) => a - b);
+
+  async function handleAddSelectedEztvTorrents() {
+    if (!series || selectedEztvTorrents.size === 0) return;
+    addingEztvTorrents = true;
+
+    const torrentsToAdd = filteredEztvTorrents.filter(t => selectedEztvTorrents.has(t.Hash));
+    let created = 0;
+    let failed = 0;
+
+    for (const torrent of torrentsToAdd) {
+      // Find the matching episode
+      const seasonEps = episodesBySeason.get(torrent.Season);
+      const ep = seasonEps?.find(e => e.episode_number === torrent.Episode);
+      if (!ep) {
+        failed++;
+        continue;
+      }
+
+      try {
+        const res = await fetch(`/admin/episodes/${ep.id}/torrent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
+          },
+          body: new URLSearchParams({
+            hash: torrent.Hash,
+            quality: torrent.Quality,
+            size: torrent.Size,
+            series_id: String(series.id),
+            season_number: String(torrent.Season),
+            episode_number: String(torrent.Episode),
+          }),
+        });
+        if (res.ok) {
+          created++;
+        } else {
+          failed++;
+        }
+      } catch {
+        failed++;
+      }
+    }
+
+    addingEztvTorrents = false;
+    showEztvModal = false;
+    selectedEztvTorrents = new Set();
+
+    if (created > 0) {
+      alert(`Added ${created} torrent${created > 1 ? 's' : ''}` + (failed > 0 ? ` (${failed} failed/skipped)` : ''));
+      await loadSeries();
+    } else if (failed > 0) {
+      alert(`Failed to add torrents. ${failed} episode${failed > 1 ? 's' : ''} not found or already have this torrent.`);
+    }
+  }
 </script>
 
 <div class="detail-page">
@@ -514,6 +652,13 @@
                     </svg>
                     Refresh from IMDB
                   {/if}
+                </button>
+                <button class="btn btn-primary" on:click={openEztvModal} disabled={!series.imdb_code}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  </svg>
+                  Search EZTV
                 </button>
                 <button class="btn btn-secondary" on:click={openEditModal}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -941,6 +1086,76 @@
   <svelte:fragment slot="footer">
     <button class="btn btn-secondary" on:click={() => showSeasonTorrentModal = false}>Cancel</button>
     <button class="btn btn-primary" on:click={handleAddSeasonTorrent}>Add to All Episodes</button>
+  </svelte:fragment>
+</Modal>
+
+<!-- EZTV Search Modal -->
+<Modal bind:open={showEztvModal} title="Search EZTV Torrents" size="lg" on:close={() => showEztvModal = false}>
+  {#if eztvLoading}
+    <div class="loading-inline">
+      <div class="spinner-small"></div>
+      <span>Searching EZTV for {series?.title}...</span>
+    </div>
+  {:else if eztvError}
+    <p class="text-muted">{eztvError}</p>
+  {:else if eztvTorrents.length > 0}
+    <div class="eztv-section">
+      <div class="section-header">
+        <h4 class="section-title">Found {eztvTorrents.length} torrents on EZTV</h4>
+        <div class="eztv-actions">
+          {#if filteredEztvTorrents.length > 0}
+            <button type="button" class="btn btn-sm btn-secondary" on:click={selectAllEztvTorrents}>
+              {selectedEztvTorrents.size === filteredEztvTorrents.length ? 'Deselect All' : 'Select All'}
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Season filter -->
+      {#if eztvSeasons.length > 1}
+        <div class="eztv-filters">
+          <button class="filter-btn" class:active={eztvSeasonFilter === null} on:click={() => { eztvSeasonFilter = null; selectedEztvTorrents = new Set(); }}>
+            All ({eztvTorrents.length})
+          </button>
+          {#each eztvSeasons as s}
+            <button class="filter-btn" class:active={eztvSeasonFilter === s} on:click={() => { eztvSeasonFilter = s; selectedEztvTorrents = new Set(); }}>
+              S{String(s).padStart(2, '0')} ({eztvTorrents.filter(t => t.Season === s).length})
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      <div class="eztv-torrents-list">
+        {#each filteredEztvTorrents as torrent (torrent.Hash)}
+          <label class="eztv-torrent-item" class:selected={selectedEztvTorrents.has(torrent.Hash)}>
+            <input
+              type="checkbox"
+              checked={selectedEztvTorrents.has(torrent.Hash)}
+              on:change={() => toggleEztvTorrent(torrent.Hash)}
+            />
+            <span class="eztv-ep-badge">S{String(torrent.Season).padStart(2, '0')}E{String(torrent.Episode).padStart(2, '0')}</span>
+            <span class="torrent-quality-badge badge-{torrent.Quality}">{torrent.Quality}</span>
+            <span class="eztv-torrent-size">{torrent.Size}</span>
+            <span class="eztv-torrent-seeds">Seeds: {torrent.Seeds}</span>
+            <span class="eztv-torrent-title" title={torrent.Title}>{torrent.Title}</span>
+          </label>
+        {/each}
+      </div>
+
+      {#if selectedEztvTorrents.size > 0}
+        <button
+          type="button"
+          class="btn btn-primary mt-3"
+          on:click={handleAddSelectedEztvTorrents}
+          disabled={addingEztvTorrents}
+        >
+          {addingEztvTorrents ? 'Adding...' : `Add ${selectedEztvTorrents.size} Torrent${selectedEztvTorrents.size > 1 ? 's' : ''}`}
+        </button>
+      {/if}
+    </div>
+  {/if}
+  <svelte:fragment slot="footer">
+    <button class="btn btn-secondary" on:click={() => showEztvModal = false}>Close</button>
   </svelte:fragment>
 </Modal>
 
@@ -1702,5 +1917,164 @@
     padding: 20px;
     text-align: center;
     color: var(--text-muted);
+  }
+
+  /* EZTV Search Modal */
+  .eztv-section {
+    min-height: 200px;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-secondary);
+  }
+
+  .eztv-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .eztv-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .filter-btn {
+    padding: 4px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .filter-btn:hover {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+  }
+
+  .filter-btn.active {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: white;
+  }
+
+  .eztv-torrents-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .eztv-torrent-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text-primary);
+    font-size: 13px;
+  }
+
+  .eztv-torrent-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-green, #22c55e);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .eztv-torrent-item:hover {
+    border-color: var(--accent-blue);
+    background: var(--bg-secondary);
+  }
+
+  .eztv-torrent-item.selected {
+    border-color: var(--accent-green, #22c55e);
+    background: rgba(34, 197, 94, 0.1);
+  }
+
+  .eztv-ep-badge {
+    font-weight: 700;
+    font-size: 12px;
+    padding: 2px 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    min-width: 60px;
+    text-align: center;
+  }
+
+  .torrent-quality-badge {
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .eztv-torrent-size {
+    color: var(--text-secondary);
+    font-size: 12px;
+    min-width: 60px;
+    flex-shrink: 0;
+  }
+
+  .eztv-torrent-seeds {
+    color: var(--accent-green, #22c55e);
+    font-weight: 500;
+    font-size: 12px;
+    min-width: 70px;
+    flex-shrink: 0;
+  }
+
+  .eztv-torrent-title {
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .loading-inline {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 0;
+    color: var(--text-muted);
+  }
+
+  .spinner-small {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .mt-3 {
+    margin-top: 12px;
   }
 </style>

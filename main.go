@@ -26,6 +26,7 @@ import (
 	"torrent-server/database"
 	"torrent-server/handlers"
 	authMiddleware "torrent-server/middleware"
+	"torrent-server/providers"
 	"torrent-server/services"
 )
 
@@ -57,13 +58,38 @@ func init() {
 	if url := os.Getenv("YTS_API_URL"); url != "" {
 		ytsAPIBaseURL = url
 		log.Printf("Using YTS API from env: %s", ytsAPIBaseURL)
-		return
+	} else {
+		// Auto-detect working mirror
+		go detectWorkingYTSMirror()
+		// Set default while detecting
+		ytsAPIBaseURL = ytsMirrors[0]
 	}
 
-	// Auto-detect working mirror
-	go detectWorkingYTSMirror()
-	// Set default while detecting
-	ytsAPIBaseURL = ytsMirrors[0]
+	// EZTV mirror detection
+	if url := os.Getenv("EZTV_API_URL"); url != "" {
+		providers.EZTVBaseURL = url
+		log.Printf("Using EZTV API from env: %s", providers.EZTVBaseURL)
+	} else {
+		go detectWorkingEZTVMirror()
+	}
+}
+
+func detectWorkingEZTVMirror() {
+	client := &http.Client{Timeout: 5 * time.Second}
+	for _, mirror := range providers.EZTVMirrors {
+		testURL := mirror + "/get-torrents?limit=1"
+		resp, err := client.Get(testURL)
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			providers.EZTVBaseURL = mirror
+			log.Printf("EZTV mirror detected: %s", mirror)
+			return
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}
+	log.Printf("Warning: No working EZTV mirror found, using default: %s", providers.EZTVBaseURL)
 }
 
 func detectWorkingYTSMirror() {
@@ -290,6 +316,32 @@ func main() {
 			defer resp.Body.Close()
 			w.Header().Set("Content-Type", "application/json")
 			io.Copy(w, resp.Body)
+		})
+
+		// EZTV API proxy (to search for series torrents)
+		r.Get("/api/eztv/search", func(w http.ResponseWriter, r *http.Request) {
+			imdb := r.URL.Query().Get("imdb")
+			if imdb == "" {
+				http.Error(w, "imdb required", http.StatusBadRequest)
+				return
+			}
+
+			results, err := providers.FetchEZTVTorrents(imdb)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":   "error",
+					"message":  "EZTV API unavailable: " + err.Error(),
+					"torrents": []interface{}{},
+				})
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":   "ok",
+				"torrents": results,
+			})
 		})
 
 		// IMDB API proxy (to avoid CORS issues)
