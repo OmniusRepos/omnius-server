@@ -520,6 +520,42 @@
 
   $: eztvSeasons = [...new Set(eztvTorrents.map(t => t.Season).filter(s => s > 0))].sort((a, b) => a - b);
 
+  async function ensureEpisodeExists(season: number, episode: number): Promise<number | null> {
+    // Check if episode already exists locally
+    const seasonEps = episodesBySeason.get(season);
+    const existing = seasonEps?.find(e => e.episode_number === episode);
+    if (existing) return existing.id;
+
+    // Create the episode
+    if (!series) return null;
+    try {
+      const res = await fetch(`/admin/series/${series.id}/episode`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json'
+        },
+        body: new URLSearchParams({
+          season: String(season),
+          episode: String(episode),
+          title: `Episode ${episode}`,
+        }),
+      });
+      if (res.ok) {
+        const ep = await res.json();
+        // Add to local map so subsequent torrents for same episode don't re-create
+        if (!episodesBySeason.has(season)) {
+          episodesBySeason.set(season, []);
+        }
+        episodesBySeason.get(season)!.push(ep);
+        return ep.id || ep.ID;
+      }
+    } catch (err) {
+      console.error(`Failed to create episode S${season}E${episode}:`, err);
+    }
+    return null;
+  }
+
   async function handleAddSelectedEztvTorrents() {
     if (!series || selectedEztvTorrents.size === 0) return;
     addingEztvTorrents = true;
@@ -529,16 +565,15 @@
     let failed = 0;
 
     for (const torrent of torrentsToAdd) {
-      // Find the matching episode
-      const seasonEps = episodesBySeason.get(torrent.Season);
-      const ep = seasonEps?.find(e => e.episode_number === torrent.Episode);
-      if (!ep) {
+      // Find or create the episode
+      const episodeId = await ensureEpisodeExists(torrent.Season, torrent.Episode);
+      if (!episodeId) {
         failed++;
         continue;
       }
 
       try {
-        const res = await fetch(`/admin/episodes/${ep.id}/torrent`, {
+        const res = await fetch(`/admin/episodes/${episodeId}/torrent`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -571,7 +606,7 @@
       alert(`Added ${created} torrent${created > 1 ? 's' : ''}` + (failed > 0 ? ` (${failed} failed/skipped)` : ''));
       await loadSeries();
     } else if (failed > 0) {
-      alert(`Failed to add torrents. ${failed} episode${failed > 1 ? 's' : ''} not found or already have this torrent.`);
+      alert(`Failed to add ${failed} torrent${failed > 1 ? 's' : ''}.`);
     }
   }
 </script>
