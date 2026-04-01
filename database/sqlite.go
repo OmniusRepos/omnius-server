@@ -110,27 +110,35 @@ func (d *DB) migrate() error {
 	CREATE TABLE IF NOT EXISTS episodes (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		series_id INTEGER NOT NULL,
-		season INTEGER NOT NULL,
-		episode INTEGER NOT NULL,
+		season_number INTEGER NOT NULL,
+		episode_number INTEGER NOT NULL,
 		title TEXT,
-		overview TEXT,
+		summary TEXT,
 		air_date TEXT,
-		imdb_code TEXT,
+		runtime INTEGER,
+		still_image TEXT,
 		FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE,
-		UNIQUE(series_id, season, episode)
+		UNIQUE(series_id, season_number, episode_number)
 	);
 
 	-- Episode torrents
 	CREATE TABLE IF NOT EXISTS episode_torrents (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		episode_id INTEGER NOT NULL,
+		series_id INTEGER,
+		season_number INTEGER,
+		episode_number INTEGER,
 		hash TEXT NOT NULL,
 		quality TEXT,
+		video_codec TEXT,
 		seeds INTEGER DEFAULT 0,
 		peers INTEGER DEFAULT 0,
 		size TEXT,
 		size_bytes INTEGER,
-		source TEXT,
+		file_index INTEGER DEFAULT 0,
+		release_group TEXT,
+		date_uploaded TEXT,
+		date_uploaded_unix INTEGER,
 		FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE
 	);
 
@@ -285,8 +293,11 @@ func (d *DB) migrate() error {
 		"ALTER TABLE series ADD COLUMN imdb_rating REAL",
 		"ALTER TABLE series ADD COLUMN rotten_tomatoes INTEGER",
 		"ALTER TABLE series ADD COLUMN franchise TEXT",
+		// Episode column renames (season -> season_number, episode -> episode_number)
+		"ALTER TABLE episodes RENAME COLUMN season TO season_number",
+		"ALTER TABLE episodes RENAME COLUMN episode TO episode_number",
+		"ALTER TABLE episodes RENAME COLUMN overview TO summary",
 		// Episode columns
-		"ALTER TABLE episodes ADD COLUMN summary TEXT",
 		"ALTER TABLE episodes ADD COLUMN runtime INTEGER",
 		"ALTER TABLE episodes ADD COLUMN still_image TEXT",
 		// Episode torrent columns
@@ -294,6 +305,7 @@ func (d *DB) migrate() error {
 		"ALTER TABLE episode_torrents ADD COLUMN season_number INTEGER",
 		"ALTER TABLE episode_torrents ADD COLUMN episode_number INTEGER",
 		"ALTER TABLE episode_torrents ADD COLUMN video_codec TEXT",
+		"ALTER TABLE episode_torrents ADD COLUMN file_index INTEGER DEFAULT 0",
 		"ALTER TABLE episode_torrents ADD COLUMN release_group TEXT",
 		"ALTER TABLE episode_torrents ADD COLUMN date_uploaded TEXT",
 		"ALTER TABLE episode_torrents ADD COLUMN date_uploaded_unix INTEGER",
