@@ -452,14 +452,28 @@ func (s *SyncService) RefreshSeries(series *models.Series) (*models.Series, erro
 		}
 	}
 
-	log.Printf("Synced %d episodes for %s", totalEpisodes, series.Title)
+	log.Printf("Synced %d episodes from IMDB for %s", totalEpisodes, series.Title)
 
 	// Update total episodes count
 	series.TotalEpisodes = uint(totalEpisodes)
 	s.db.UpdateSeries(series)
 
-	// Sync torrents from EZTV
+	// Sync torrents from EZTV (this also creates episodes if IMDB had none)
 	s.syncSeriesEpisodeTorrents(series)
+
+	// Re-count episodes from DB (EZTV may have created episodes that IMDB didn't have)
+	if totalEpisodes == 0 {
+		actualCount := 0
+		for season := 1; season <= int(series.TotalSeasons)+1; season++ {
+			eps, _ := s.db.GetEpisodes(series.ID, season)
+			actualCount += len(eps)
+		}
+		if actualCount > 0 {
+			series.TotalEpisodes = uint(actualCount)
+			s.db.UpdateSeries(series)
+			log.Printf("Updated episode count from EZTV data: %d episodes for %s", actualCount, series.Title)
+		}
+	}
 
 	// Sync subtitles per-episode in background
 	go s.syncSeriesSubtitles(series)
