@@ -249,6 +249,41 @@ func (d *DB) GetEpisodeTorrents(episodeID uint) ([]models.EpisodeTorrent, error)
 }
 
 func (d *DB) CreateEpisodeTorrent(t *models.EpisodeTorrent) error {
+	// Check if torrent with same hash already exists for this episode
+	var existingID int64
+	var existingSeeds int
+	err := d.QueryRow(`SELECT id, seeds FROM episode_torrents WHERE episode_id = $1 AND hash = $2`,
+		t.EpisodeID, t.Hash).Scan(&existingID, &existingSeeds)
+
+	if err == nil {
+		// Exists — update if new one has more seeds
+		if int(t.Seeds) > existingSeeds {
+			_, err = d.Exec(`UPDATE episode_torrents SET seeds = $1, peers = $2, size = $3, size_bytes = $4 WHERE id = $5`,
+				t.Seeds, t.Peers, t.Size, t.SizeBytes, existingID)
+		}
+		t.ID = uint(existingID)
+		return err
+	}
+
+	// Check if same quality already exists for this episode — keep best seeds
+	err = d.QueryRow(`SELECT id, seeds FROM episode_torrents WHERE episode_id = $1 AND quality = $2`,
+		t.EpisodeID, t.Quality).Scan(&existingID, &existingSeeds)
+
+	if err == nil && int(t.Seeds) <= existingSeeds {
+		// Existing torrent for this quality has more seeds, skip
+		return nil
+	}
+
+	if err == nil {
+		// Replace with better-seeded torrent
+		_, err = d.Exec(`UPDATE episode_torrents SET hash = $1, seeds = $2, peers = $3, size = $4, size_bytes = $5,
+			video_codec = $6, release_group = $7 WHERE id = $8`,
+			t.Hash, t.Seeds, t.Peers, t.Size, t.SizeBytes, t.VideoCodec, t.ReleaseGroup, existingID)
+		t.ID = uint(existingID)
+		return err
+	}
+
+	// New torrent — insert
 	result, err := d.Exec(`
 		INSERT INTO episode_torrents (episode_id, series_id, season_number, episode_number, hash, quality,
 		                              video_codec, seeds, peers, size, size_bytes, file_index, release_group,
