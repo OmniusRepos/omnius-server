@@ -15,6 +15,7 @@
   import Curated from './routes/Curated.svelte';
   import ApiDocs from './routes/ApiDocs.svelte';
   import Settings from './routes/Settings.svelte';
+  import TorrentSearch from './routes/TorrentSearch.svelte';
 
   let isAuthenticated = $state(false);
   let checkingAuth = $state(true);
@@ -49,6 +50,7 @@
     '/channels': Channels,
     '/curated': Curated,
     '/api-docs': ApiDocs,
+    '/torrents': TorrentSearch,
     '/settings': Settings,
   };
 </script>

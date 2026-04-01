@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -341,6 +342,46 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":   "ok",
 				"torrents": results,
+			})
+		})
+
+		// Torrent aggregator - search all providers
+		r.Get("/api/torrents/search", func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query().Get("query")
+			contentType := r.URL.Query().Get("type") // "movie" or "series"
+			imdb := r.URL.Query().Get("imdb")
+			yearStr := r.URL.Query().Get("year")
+
+			if query == "" && imdb == "" {
+				http.Error(w, "query or imdb required", http.StatusBadRequest)
+				return
+			}
+
+			agg := providers.NewAggregator()
+			var results []providers.AggregatorResult
+
+			switch contentType {
+			case "series":
+				if imdb != "" {
+					results = agg.SearchSeriesByIMDB(imdb, query)
+				} else {
+					results = agg.SearchSeries(query, 0, 0)
+				}
+			default: // "movie" or empty
+				year := 0
+				if yearStr != "" {
+					year, _ = strconv.Atoi(yearStr)
+				}
+				results = agg.SearchMovie(query, year)
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  "ok",
+				"query":   query,
+				"type":    contentType,
+				"count":   len(results),
+				"results": results,
 			})
 		})
 
