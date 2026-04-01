@@ -157,8 +157,22 @@
         }),
       });
       if (res.ok) {
+        const data = await res.json();
+        const newSeriesId = data?.id || data?.ID;
         showAddModal = false;
-        page = 1; // Reset to first page to see new series at top
+
+        // Auto-refresh from IMDB to pull episodes and torrents
+        if (seriesForm.imdb_code && newSeriesId) {
+          try {
+            await fetch('/api/v2/refresh_series', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ series_id: newSeriesId }),
+            });
+          } catch {}
+        }
+
+        page = 1;
         loadSeries();
       }
     } catch (err) {
