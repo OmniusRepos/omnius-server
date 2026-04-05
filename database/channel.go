@@ -1,10 +1,10 @@
 package database
 
 import (
-	"database/sql"
-	"encoding/json"
 	"fmt"
-	"strings"
+	"time"
+
+	"gorm.io/gorm/clause"
 
 	"torrent-server/models"
 )
@@ -25,383 +25,181 @@ func (d *DB) ListChannels(filter ChannelFilter) ([]models.Channel, int, error) {
 		filter.Page = 1
 	}
 
-	var conditions []string
-	var args []any
-
+	query := d.Model(&models.Channel{})
 	if filter.Country != "" {
-		conditions = append(conditions, "country = ?")
-		args = append(args, filter.Country)
+		query = query.Where("country = ?", filter.Country)
 	}
-
 	if filter.Category != "" {
-		conditions = append(conditions, "categories LIKE ?")
-		args = append(args, "%"+filter.Category+"%")
+		query = query.Where("categories LIKE ?", "%"+filter.Category+"%")
 	}
-
 	if filter.QueryTerm != "" {
-		conditions = append(conditions, "name LIKE ?")
-		args = append(args, "%"+filter.QueryTerm+"%")
+		query = query.Where("name LIKE ?", "%"+filter.QueryTerm+"%")
 	}
 
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = " WHERE " + strings.Join(conditions, " AND ")
-	}
-
-	var totalCount int
-	countQuery := "SELECT COUNT(*) FROM channels" + whereClause
-	if err := d.QueryRow(countQuery, args...).Scan(&totalCount); err != nil {
-		return nil, 0, err
-	}
+	var totalCount int64
+	query.Count(&totalCount)
 
 	offset := (filter.Page - 1) * filter.Limit
-	query := `SELECT id, name, country, languages, categories, logo, stream_url
-		FROM channels` + whereClause + ` ORDER BY name ASC LIMIT ? OFFSET ?`
-	args = append(args, filter.Limit, offset)
-
-	rows, err := d.Query(query, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
 	var channels []models.Channel
-	for rows.Next() {
-		c := scanChannel(rows)
-		if c != nil {
-			channels = append(channels, *c)
-		}
-	}
-
-	return channels, totalCount, nil
+	err := query.Order("name ASC").Limit(filter.Limit).Offset(offset).Find(&channels).Error
+	return channels, int(totalCount), err
 }
 
 func (d *DB) GetChannel(id string) (*models.Channel, error) {
 	var c models.Channel
-	var languages, categories, logo, streamURL sql.NullString
-
-	err := d.QueryRow(`
-		SELECT id, name, country, languages, categories, logo, stream_url
-		FROM channels WHERE id = ?
-	`, id).Scan(&c.ID, &c.Name, &c.Country, &languages, &categories, &logo, &streamURL)
-	if err != nil {
+	if err := d.First(&c, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
-
-	c.Logo = logo.String
-	c.StreamURL = streamURL.String
-	if languages.String != "" {
-		json.Unmarshal([]byte(languages.String), &c.Languages)
-	}
-	if categories.String != "" {
-		json.Unmarshal([]byte(categories.String), &c.Categories)
-	}
-
 	return &c, nil
 }
 
 func (d *DB) ListChannelCountries() ([]models.ChannelCountry, error) {
-	rows, err := d.Query(`
-		SELECT cc.code, cc.name, COALESCE(cc.flag, ''), COUNT(ch.id) as channel_count
-		FROM channel_countries cc
-		LEFT JOIN channels ch ON ch.country = cc.code
-		GROUP BY cc.code, cc.name, cc.flag
-		HAVING channel_count > 0
-		ORDER BY cc.name
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var countries []models.ChannelCountry
-	for rows.Next() {
-		var c models.ChannelCountry
-		if err := rows.Scan(&c.Code, &c.Name, &c.Flag, &c.ChannelCount); err != nil {
-			continue
-		}
-		countries = append(countries, c)
-	}
-
-	return countries, nil
+	err := d.Model(&models.ChannelCountry{}).
+		Select("channel_countries.code, channel_countries.name, COALESCE(channel_countries.flag, '') as flag, COUNT(channels.id) as channel_count").
+		Joins("LEFT JOIN channels ON channels.country = channel_countries.code").
+		Group("channel_countries.code, channel_countries.name, channel_countries.flag").
+		Having("COUNT(channels.id) > 0").
+		Order("channel_countries.name").
+		Find(&countries).Error
+	return countries, err
 }
 
 func (d *DB) ListChannelCategories() ([]models.ChannelCategory, error) {
-	rows, err := d.Query(`SELECT id, name FROM channel_categories ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var categories []models.ChannelCategory
-	for rows.Next() {
-		var c models.ChannelCategory
-		if err := rows.Scan(&c.ID, &c.Name); err != nil {
-			continue
-		}
-		categories = append(categories, c)
-	}
-
-	return categories, nil
+	err := d.Order("name").Find(&categories).Error
+	return categories, err
 }
 
 func (d *DB) GetChannelsByCountry(countryCode string, limit int) ([]models.Channel, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-
-	rows, err := d.Query(`
-		SELECT id, name, country, languages, categories, logo, stream_url
-		FROM channels WHERE country = ? ORDER BY name LIMIT ?
-	`, countryCode, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var channels []models.Channel
-	for rows.Next() {
-		c := scanChannel(rows)
-		if c != nil {
-			channels = append(channels, *c)
-		}
-	}
-
-	return channels, nil
+	err := d.Where("country = ?", countryCode).Order("name").Limit(limit).Find(&channels).Error
+	return channels, err
 }
 
-// --- Upsert methods for IPTV sync ---
-
 func (d *DB) UpsertChannel(ch *models.Channel) error {
-	languagesJSON, _ := json.Marshal(ch.Languages)
-	categoriesJSON, _ := json.Marshal(ch.Categories)
-	nsfw := 0
-	if ch.IsNSFW {
-		nsfw = 1
-	}
-
-	_, err := d.Exec(`
-		INSERT INTO channels (id, name, country, languages, categories, logo, stream_url, is_nsfw, website, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(id) DO UPDATE SET
-			name = excluded.name,
-			country = excluded.country,
-			languages = excluded.languages,
-			categories = excluded.categories,
-			logo = excluded.logo,
-			stream_url = excluded.stream_url,
-			is_nsfw = excluded.is_nsfw,
-			website = excluded.website,
-			updated_at = CURRENT_TIMESTAMP
-	`, ch.ID, ch.Name, ch.Country, string(languagesJSON), string(categoriesJSON), ch.Logo, ch.StreamURL, nsfw, ch.Website)
-	return err
+	return d.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"name", "country", "languages", "categories", "logo", "stream_url", "is_nsfw", "website", "updated_at"}),
+	}).Create(ch).Error
 }
 
 func (d *DB) UpsertChannelCountry(c *models.ChannelCountry) error {
-	_, err := d.Exec(`
-		INSERT INTO channel_countries (code, name, flag)
-		VALUES (?, ?, ?)
-		ON CONFLICT(code) DO UPDATE SET name = excluded.name, flag = excluded.flag
-	`, c.Code, c.Name, c.Flag)
-	return err
+	return d.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "code"}},
+		DoUpdates: clause.AssignmentColumns([]string{"name", "flag"}),
+	}).Create(c).Error
 }
 
 func (d *DB) UpsertChannelCategory(c *models.ChannelCategory) error {
-	_, err := d.Exec(`
-		INSERT INTO channel_categories (id, name)
-		VALUES (?, ?)
-		ON CONFLICT(id) DO UPDATE SET name = excluded.name
-	`, c.ID, c.Name)
-	return err
+	return d.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"name"}),
+	}).Create(c).Error
 }
 
 func (d *DB) ClearChannels() error {
-	_, err := d.Exec("DELETE FROM channels")
-	return err
+	return d.Where("1 = 1").Delete(&models.Channel{}).Error
 }
 
 func (d *DB) CountChannels() (int, error) {
-	var count int
-	err := d.QueryRow("SELECT COUNT(*) FROM channels").Scan(&count)
-	return count, err
+	var count int64
+	err := d.Model(&models.Channel{}).Count(&count).Error
+	return int(count), err
 }
 
 func (d *DB) DeleteChannel(id string) error {
-	_, err := d.Exec("DELETE FROM channels WHERE id = ?", id)
-	return err
+	return d.Where("id = ?", id).Delete(&models.Channel{}).Error
 }
 
-// --- EPG methods ---
-
 func (d *DB) UpsertEPG(epg *models.ChannelEPG) error {
-	_, err := d.Exec(`
-		INSERT INTO channel_epg (channel_id, title, description, start_time, end_time)
-		VALUES (?, ?, ?, ?, ?)
-	`, epg.ChannelID, epg.Title, epg.Description, epg.StartTime, epg.EndTime)
-	return err
+	return d.Create(epg).Error
 }
 
 func (d *DB) GetEPG(channelID string) ([]models.ChannelEPG, error) {
-	rows, err := d.Query(`
-		SELECT id, channel_id, title, COALESCE(description, ''), start_time, end_time
-		FROM channel_epg
-		WHERE channel_id = ? AND end_time >= datetime('now')
-		ORDER BY start_time ASC
-		LIMIT 50
-	`, channelID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var epgs []models.ChannelEPG
-	for rows.Next() {
-		var e models.ChannelEPG
-		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.StartTime, &e.EndTime); err != nil {
-			continue
-		}
-		epgs = append(epgs, e)
-	}
-	return epgs, nil
+	err := d.Where("channel_id = ? AND end_time >= ?", channelID, time.Now().Format("2006-01-02 15:04:05")).
+		Order("start_time ASC").Limit(50).Find(&epgs).Error
+	return epgs, err
 }
 
 func (d *DB) ClearEPG() error {
-	_, err := d.Exec("DELETE FROM channel_epg")
-	return err
+	return d.Where("1 = 1").Delete(&models.ChannelEPG{}).Error
 }
 
 func (d *DB) GetChannelStats() (map[string]int, error) {
 	stats := make(map[string]int)
-	var count int
-
-	d.QueryRow("SELECT COUNT(*) FROM channels").Scan(&count)
-	stats["channels"] = count
-	d.QueryRow("SELECT COUNT(DISTINCT country) FROM channels WHERE country != ''").Scan(&count)
-	stats["countries"] = count
-	d.QueryRow("SELECT COUNT(*) FROM channel_categories").Scan(&count)
-	stats["categories"] = count
-	d.QueryRow("SELECT COUNT(*) FROM channels WHERE stream_url != '' AND stream_url IS NOT NULL").Scan(&count)
-	stats["with_streams"] = count
-	d.QueryRow("SELECT COUNT(*) FROM channel_blocklist").Scan(&count)
-	stats["blocklisted"] = count
-
+	var count int64
+	d.Model(&models.Channel{}).Count(&count)
+	stats["channels"] = int(count)
+	d.Model(&models.Channel{}).Where("country != ''").Distinct("country").Count(&count)
+	stats["countries"] = int(count)
+	d.Model(&models.ChannelCategory{}).Count(&count)
+	stats["categories"] = int(count)
+	d.Model(&models.Channel{}).Where("stream_url != '' AND stream_url IS NOT NULL").Count(&count)
+	stats["with_streams"] = int(count)
+	d.Model(&models.ChannelBlocklist{}).Count(&count)
+	stats["blocklisted"] = int(count)
 	return stats, nil
 }
 
-// GetAllChannelsWithStreams returns all channels that have a non-empty stream URL
 func (d *DB) GetAllChannelsWithStreams() ([]models.Channel, error) {
-	rows, err := d.Query(`
-		SELECT id, name, country, languages, categories, logo, stream_url
-		FROM channels
-		WHERE stream_url IS NOT NULL AND stream_url != ''
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var channels []models.Channel
-	for rows.Next() {
-		c := scanChannel(rows)
-		if c != nil {
-			channels = append(channels, *c)
-		}
-	}
-	return channels, nil
+	err := d.Where("stream_url IS NOT NULL AND stream_url != ''").Find(&channels).Error
+	return channels, err
 }
 
-// --- Helper ---
-
-func scanChannel(rows *sql.Rows) *models.Channel {
-	var c models.Channel
-	var languages, categories, logo, streamURL sql.NullString
-
-	err := rows.Scan(&c.ID, &c.Name, &c.Country, &languages, &categories, &logo, &streamURL)
-	if err != nil {
-		return nil
-	}
-
-	c.Logo = logo.String
-	c.StreamURL = streamURL.String
-	if languages.String != "" {
-		json.Unmarshal([]byte(languages.String), &c.Languages)
-	}
-	if categories.String != "" {
-		json.Unmarshal([]byte(categories.String), &c.Categories)
-	}
-
-	return &c
-}
-
-// UpdateChannelStream updates only the stream_url for a channel
 func (d *DB) UpdateChannelStream(channelID, streamURL string) error {
-	_, err := d.Exec("UPDATE channels SET stream_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", streamURL, channelID)
-	return err
+	return d.Model(&models.Channel{}).Where("id = ?", channelID).
+		Updates(map[string]interface{}{"stream_url": streamURL, "updated_at": time.Now()}).Error
 }
 
-// --- Blocklist methods ---
-
-// AddToBlocklist adds a channel ID to the blocklist
 func (d *DB) AddToBlocklist(channelID, reason string) error {
-	_, err := d.Exec(`
-		INSERT INTO channel_blocklist (channel_id, reason, blocked_at)
-		VALUES (?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(channel_id) DO UPDATE SET reason = excluded.reason, blocked_at = CURRENT_TIMESTAMP
-	`, channelID, reason)
-	return err
+	bl := models.ChannelBlocklist{ChannelID: channelID, Reason: reason}
+	return d.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "channel_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"reason", "blocked_at"}),
+	}).Create(&bl).Error
 }
 
-// IsBlocklisted checks if a channel ID is in the blocklist
 func (d *DB) IsBlocklisted(channelID string) bool {
-	var count int
-	d.QueryRow("SELECT COUNT(*) FROM channel_blocklist WHERE channel_id = ?", channelID).Scan(&count)
+	var count int64
+	d.Model(&models.ChannelBlocklist{}).Where("channel_id = ?", channelID).Count(&count)
 	return count > 0
 }
 
-// GetBlocklistCount returns the number of blocklisted channels
 func (d *DB) GetBlocklistCount() int {
-	var count int
-	d.QueryRow("SELECT COUNT(*) FROM channel_blocklist").Scan(&count)
-	return count
+	var count int64
+	d.Model(&models.ChannelBlocklist{}).Count(&count)
+	return int(count)
 }
 
-// ClearBlocklist removes all entries from the blocklist
 func (d *DB) ClearBlocklist() error {
-	_, err := d.Exec("DELETE FROM channel_blocklist")
-	return err
+	return d.Where("1 = 1").Delete(&models.ChannelBlocklist{}).Error
 }
 
-// GetBlocklistedIDs returns all blocklisted channel IDs as a map for fast lookup
 func (d *DB) GetBlocklistedIDs() map[string]bool {
 	result := make(map[string]bool)
-	rows, err := d.Query("SELECT channel_id FROM channel_blocklist")
-	if err != nil {
-		return result
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err == nil {
-			result[id] = true
-		}
+	var ids []string
+	d.Model(&models.ChannelBlocklist{}).Pluck("channel_id", &ids)
+	for _, id := range ids {
+		result[id] = true
 	}
 	return result
 }
 
-// GetChannelCountByCategory returns the count of channels per category
 func (d *DB) GetChannelCountByCategory() ([]models.ChannelCategory, error) {
-	// First get all categories
 	cats, err := d.ListChannelCategories()
 	if err != nil {
 		return nil, err
 	}
-
 	for i, cat := range cats {
-		var count int
-		d.QueryRow("SELECT COUNT(*) FROM channels WHERE categories LIKE ?", fmt.Sprintf("%%%s%%", cat.ID)).Scan(&count)
-		cats[i].ChannelCount = count
+		var count int64
+		d.Model(&models.Channel{}).Where("categories LIKE ?", fmt.Sprintf("%%%s%%", cat.ID)).Count(&count)
+		cats[i].ChannelCount = int(count)
 	}
-
 	return cats, nil
 }
