@@ -12,6 +12,6 @@ env:
   ADMIN_PASSWORD: "demo"
   LICENSE_ADMIN_SECRET: "omnius-admin-2026"
   SERVER_DOMAIN: "api.omnius.lol"
-  DATABASE_URL: "postgres://basepod:74aeb7b409fd4a2028cd4775@basepod-postgres:5432/omnius?sslmode=disable"
+  DATABASE_URL: "postgres://basepod:74aeb7b409fd4a2028cd4775@10.89.0.6:5432/omnius?sslmode=disable"
 volumes:
   - omnius-data:/app/data
