@@ -1,15 +1,15 @@
 package models
 
 type Torrent struct {
-	ID               uint   `json:"-"`
-	MovieID          uint   `json:"-"`
+	ID               uint   `json:"-" gorm:"primaryKey"`
+	MovieID          uint   `json:"-" gorm:"index;not null"`
 	URL              string `json:"url"`
-	Hash             string `json:"hash"`
+	Hash             string `json:"hash" gorm:"index;not null"`
 	Quality          string `json:"quality"`
-	Type             string `json:"type"`
+	Type             string `json:"type" gorm:"default:'web'"`
 	VideoCodec       string `json:"video_codec,omitempty"`
-	Seeds            uint   `json:"seeds"`
-	Peers            uint   `json:"peers"`
+	Seeds            uint   `json:"seeds" gorm:"default:0"`
+	Peers            uint   `json:"peers" gorm:"default:0"`
 	Size             string `json:"size"`
 	SizeBytes        uint64 `json:"size_bytes"`
 	DateUploaded     string `json:"date_uploaded"`

@@ -1,24 +1,24 @@
 package config
 
-import (
-	"os"
-)
+import "os"
 
 type Config struct {
-	Port              string
-	AdminPassword     string
-	DatabasePath      string
-	DownloadDir       string
-	OmdbAPIKey        string
+	Port          string
+	AdminPassword string
+	DatabasePath  string
+	DatabaseURL   string
+	DownloadDir   string
+	OmdbAPIKey    string
 }
 
 func Load() *Config {
 	return &Config{
-		Port:              getEnv("PORT", "8080"),
-		AdminPassword:     getEnv("ADMIN_PASSWORD", "admin"),
-		DatabasePath:      getEnv("DATABASE_PATH", "./data/omnius.db"),
-		DownloadDir:       getEnv("DOWNLOAD_DIR", "./data/downloads"),
-		OmdbAPIKey:        getEnv("OMDB_API_KEY", ""),
+		Port:          getEnv("PORT", "8080"),
+		AdminPassword: getEnv("ADMIN_PASSWORD", "admin"),
+		DatabasePath:  getEnv("DATABASE_PATH", "./data/omnius.db"),
+		DatabaseURL:   getEnv("DATABASE_URL", ""),
+		DownloadDir:   getEnv("DOWNLOAD_DIR", "./data/downloads"),
+		OmdbAPIKey:    getEnv("OMDB_API_KEY", ""),
 	}
 }
 
