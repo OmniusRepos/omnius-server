@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"torrent-server/database"
+	"torrent-server/models"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -26,7 +27,7 @@ func (h *HomeHandler) AdminListHomeSections(w http.ResponseWriter, r *http.Reque
 	}
 
 	if sections == nil {
-		sections = []database.HomeSection{}
+		sections = []models.HomeSection{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -35,7 +36,7 @@ func (h *HomeHandler) AdminListHomeSections(w http.ResponseWriter, r *http.Reque
 
 // AdminCreateHomeSection handles POST /admin/api/home/sections
 func (h *HomeHandler) AdminCreateHomeSection(w http.ResponseWriter, r *http.Request) {
-	var section database.HomeSection
+	var section models.HomeSection
 	if err := json.NewDecoder(r.Body).Decode(&section); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
@@ -67,7 +68,7 @@ func (h *HomeHandler) AdminCreateHomeSection(w http.ResponseWriter, r *http.Requ
 func (h *HomeHandler) AdminUpdateHomeSection(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	var section database.HomeSection
+	var section models.HomeSection
 	if err := json.NewDecoder(r.Body).Decode(&section); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return

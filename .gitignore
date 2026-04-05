@@ -28,3 +28,9 @@ Thumbs.db
 vendor/
 data/omnius.db
 .loom/
+
+# Deployment (contains credentials)
+basepod.yaml
+
+# Environment
+.env
