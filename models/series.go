@@ -31,8 +31,8 @@ type Series struct {
 
 type Season struct {
 	ID           uint   `json:"id" gorm:"primaryKey"`
-	SeriesID     uint   `json:"series_id" gorm:"index;not null"`
-	SeasonNumber uint   `json:"season_number"`
+	SeriesID     uint   `json:"series_id" gorm:"uniqueIndex:idx_series_season;not null"`
+	SeasonNumber uint   `json:"season_number" gorm:"uniqueIndex:idx_series_season"`
 	EpisodeCount uint   `json:"episode_count" gorm:"default:0"`
 	AirDate      string `json:"air_date,omitempty"`
 	PosterImage  string `json:"poster_image,omitempty"`
