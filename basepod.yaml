@@ -1,4 +1,4 @@
-name: omnius-api
+name: omnius
 server: bp.common.al
 port: 8080
 domains:
