@@ -187,6 +187,9 @@ func main() {
 	// Initialize sync service (for syncing movies from external sources)
 	syncService := services.NewSyncService(db, subtitlesDir)
 
+	// Wire sync service into APIHandler for search auto-import
+	apiHandler.SetSyncService(syncService)
+
 	// Initialize ratings handler
 	ratingsHandler := handlers.NewRatingsHandler(db, syncService)
 
@@ -218,6 +221,7 @@ func main() {
 
 		// Movies
 		r.Get("/list_movies.json", apiHandler.ListMovies)
+		r.Get("/search_online.json", apiHandler.SearchOnline)
 		r.Get("/movie_details.json", apiHandler.MovieDetails)
 		r.Get("/movie_suggestions.json", apiHandler.MovieSuggestions)
 		r.Get("/franchise_movies.json", apiHandler.FranchiseMovies)

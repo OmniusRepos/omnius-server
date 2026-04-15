@@ -37,6 +37,7 @@ type ytsResponse struct {
 
 type ytsMovie struct {
 	ID       int    `json:"id"`
+	ImdbCode string `json:"imdb_code"`
 	Title    string `json:"title"`
 	Year     int    `json:"year"`
 	Torrents []struct {
@@ -108,6 +109,46 @@ func (p *YTSProvider) SearchMovie(title string, year int) ([]TorrentResult, erro
 func (p *YTSProvider) SearchSeries(title string, season, episode int) ([]TorrentResult, error) {
 	// YTS doesn't support series
 	return nil, fmt.Errorf("YTS does not support series")
+}
+
+// YTSMovieHit is a lightweight movie result used for auto-import flows.
+type YTSMovieHit struct {
+	ImdbCode string
+	Title    string
+	Year     int
+}
+
+// SearchMoviesByQuery returns YTS movie hits for a free-text query (with imdb_code).
+func (p *YTSProvider) SearchMoviesByQuery(query string, limit int) ([]YTSMovieHit, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	params := url.Values{}
+	params.Set("query_term", query)
+	params.Set("limit", strconv.Itoa(limit))
+
+	resp, err := http.Get(p.baseURL + "/list_movies.json?" + params.Encode())
+	if err != nil {
+		return nil, fmt.Errorf("YTS request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var ytsResp ytsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ytsResp); err != nil {
+		return nil, fmt.Errorf("YTS decode failed: %w", err)
+	}
+	if ytsResp.Status != "ok" {
+		return nil, fmt.Errorf("YTS error: %s", ytsResp.StatusMessage)
+	}
+
+	hits := make([]YTSMovieHit, 0, len(ytsResp.Data.Movies))
+	for _, m := range ytsResp.Data.Movies {
+		if m.ImdbCode == "" {
+			continue
+		}
+		hits = append(hits, YTSMovieHit{ImdbCode: m.ImdbCode, Title: m.Title, Year: m.Year})
+	}
+	return hits, nil
 }
 
 func buildMagnetURL(hash, name string) string {

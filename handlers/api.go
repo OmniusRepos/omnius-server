@@ -8,14 +8,21 @@ import (
 
 	"torrent-server/database"
 	"torrent-server/models"
+	"torrent-server/services"
 )
 
 type APIHandler struct {
-	db *database.DB
+	db          *database.DB
+	syncService *services.SyncService
 }
 
 func NewAPIHandler(db *database.DB) *APIHandler {
 	return &APIHandler{db: db}
+}
+
+// SetSyncService wires the sync service for online-search auto-import.
+func (h *APIHandler) SetSyncService(s *services.SyncService) {
+	h.syncService = s
 }
 
 // ListMovies handles GET /api/v2/list_movies.json
@@ -43,6 +50,13 @@ func (h *APIHandler) ListMovies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-import from YTS when searching and local matches are sparse.
+	if h.syncService != nil && filter.QueryTerm != "" && totalCount < 3 {
+		if _, err := h.syncService.SearchAndSyncFromYTS(filter.QueryTerm, 5); err == nil {
+			movies, totalCount, _ = h.db.ListMovies(filter)
+		}
+	}
+
 	if movies == nil {
 		movies = []models.Movie{}
 	}
@@ -54,6 +68,45 @@ func (h *APIHandler) ListMovies(w http.ResponseWriter, r *http.Request) {
 		Movies:     movies,
 	}
 
+	writeSuccess(w, data)
+}
+
+// SearchOnline handles GET /api/v2/search_online.json?query_term=X — explicit
+// trigger that searches YTS and imports new matches, then returns the refreshed
+// local list for the same query.
+func (h *APIHandler) SearchOnline(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	query := strings.TrimSpace(q.Get("query_term"))
+	if query == "" {
+		writeError(w, "query_term is required")
+		return
+	}
+	if h.syncService == nil {
+		writeError(w, "sync service unavailable")
+		return
+	}
+
+	synced, syncErr := h.syncService.SearchAndSyncFromYTS(query, parseInt(q.Get("limit"), 5))
+	filter := database.MovieFilter{
+		Limit:     parseInt(q.Get("limit"), 20),
+		Page:      parseInt(q.Get("page"), 1),
+		QueryTerm: query,
+	}
+	movies, totalCount, _ := h.db.ListMovies(filter)
+	if movies == nil {
+		movies = []models.Movie{}
+	}
+
+	data := map[string]interface{}{
+		"movie_count":  totalCount,
+		"limit":        filter.Limit,
+		"page_number":  filter.Page,
+		"movies":       movies,
+		"synced_count": len(synced),
+	}
+	if syncErr != nil {
+		data["sync_error"] = syncErr.Error()
+	}
 	writeSuccess(w, data)
 }
 

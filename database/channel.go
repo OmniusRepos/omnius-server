@@ -41,7 +41,7 @@ func (d *DB) ListChannels(filter ChannelFilter) ([]models.Channel, int, error) {
 
 	offset := (filter.Page - 1) * filter.Limit
 	var channels []models.Channel
-	err := query.Order("name ASC").Limit(filter.Limit).Offset(offset).Find(&channels).Error
+	err := query.Order("country ASC, name ASC").Limit(filter.Limit).Offset(offset).Find(&channels).Error
 	return channels, int(totalCount), err
 }
 

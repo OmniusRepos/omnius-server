@@ -19,7 +19,12 @@ type SyncService struct {
 	subtitleService *SubtitleService
 	mu              sync.Mutex
 	running         bool
+
+	searchCache   map[string]time.Time
+	searchCacheMu sync.Mutex
 }
+
+const searchCacheTTL = 5 * time.Minute
 
 func NewSyncService(db *database.DB, subtitlesDir string) *SyncService {
 	return &SyncService{
@@ -31,7 +36,52 @@ func NewSyncService(db *database.DB, subtitlesDir string) *SyncService {
 			providers.NewEZTVProvider(),
 			providers.NewL337xProvider(),
 		},
+		searchCache: make(map[string]time.Time),
 	}
+}
+
+// SearchAndSyncFromYTS queries YTS for a free-text term and syncs up to max hits.
+// Results are cached per normalized query for searchCacheTTL to avoid spam.
+// Returns the list of synced/updated movies.
+func (s *SyncService) SearchAndSyncFromYTS(query string, max int) ([]models.Movie, error) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return nil, nil
+	}
+	if max <= 0 {
+		max = 5
+	}
+
+	s.searchCacheMu.Lock()
+	if t, ok := s.searchCache[q]; ok && time.Since(t) < searchCacheTTL {
+		s.searchCacheMu.Unlock()
+		return nil, nil
+	}
+	s.searchCache[q] = time.Now()
+	s.searchCacheMu.Unlock()
+
+	yts := providers.NewYTSProvider()
+	hits, err := yts.SearchMoviesByQuery(query, max)
+	if err != nil {
+		return nil, err
+	}
+
+	synced := make([]models.Movie, 0, len(hits))
+	for i, h := range hits {
+		if i >= max {
+			break
+		}
+		m, err := s.SyncMovie(h.ImdbCode)
+		if err != nil {
+			log.Printf("[SearchAndSync] %s (%s) failed: %v", h.Title, h.ImdbCode, err)
+			continue
+		}
+		if m != nil {
+			synced = append(synced, *m)
+		}
+	}
+	log.Printf("[SearchAndSync] query=%q yts_hits=%d synced=%d", query, len(hits), len(synced))
+	return synced, nil
 }
 
 // SyncMovie fetches metadata and torrents for a movie
