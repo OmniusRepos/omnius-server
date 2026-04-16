@@ -11,27 +11,51 @@ import (
 
 	"torrent-server/database"
 	"torrent-server/models"
+	"torrent-server/services"
 )
 
 type SeriesHandler struct {
-	db *database.DB
+	db          *database.DB
+	syncService *services.SyncService
 }
 
 func NewSeriesHandler(db *database.DB) *SeriesHandler {
 	return &SeriesHandler{db: db}
 }
 
+// SetSyncService wires the sync service for online-search auto-import.
+func (h *SeriesHandler) SetSyncService(s *services.SyncService) {
+	h.syncService = s
+}
+
 // ListSeries handles GET /api/v2/list_series.json
 func (h *SeriesHandler) ListSeries(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
-	limit := parseInt(q.Get("limit"), 20)
-	page := parseInt(q.Get("page"), 1)
+	filter := database.SeriesFilter{
+		Limit:         parseInt(q.Get("limit"), 20),
+		Page:          parseInt(q.Get("page"), 1),
+		MinimumRating: float32(parseFloat(q.Get("minimum_rating"), 0)),
+		QueryTerm:     q.Get("query_term"),
+		Genre:         q.Get("genre"),
+		SortBy:        q.Get("sort_by"),
+		OrderBy:       q.Get("order_by"),
+		Year:          parseInt(q.Get("year"), 0),
+		Status:        q.Get("status"),
+		Network:       q.Get("network"),
+	}
 
-	series, totalCount, err := h.db.ListSeries(limit, page)
+	series, totalCount, err := h.db.ListSeries(filter)
 	if err != nil {
 		writeError(w, "Failed to fetch series: "+err.Error())
 		return
+	}
+
+	// Auto-import from EZTV+IMDB when searching and local matches are sparse.
+	if h.syncService != nil && filter.QueryTerm != "" && totalCount < 3 {
+		if _, err := h.syncService.SearchAndSyncSeries(filter.QueryTerm, 5); err == nil {
+			series, totalCount, _ = h.db.ListSeries(filter)
+		}
 	}
 
 	if series == nil {
@@ -40,11 +64,50 @@ func (h *SeriesHandler) ListSeries(w http.ResponseWriter, r *http.Request) {
 
 	data := map[string]interface{}{
 		"series_count": totalCount,
-		"limit":        limit,
-		"page_number":  page,
+		"limit":        filter.Limit,
+		"page_number":  filter.Page,
 		"series":       series,
 	}
 
+	writeSuccess(w, data)
+}
+
+// SearchSeriesOnline handles GET /api/v2/search_series_online.json?query_term=X —
+// explicit trigger that searches IMDB (tvSeries) + EZTV and imports new matches,
+// then returns the refreshed local list for the same query.
+func (h *SeriesHandler) SearchSeriesOnline(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	query := strings.TrimSpace(q.Get("query_term"))
+	if query == "" {
+		writeError(w, "query_term is required")
+		return
+	}
+	if h.syncService == nil {
+		writeError(w, "sync service unavailable")
+		return
+	}
+
+	synced, syncErr := h.syncService.SearchAndSyncSeries(query, parseInt(q.Get("limit"), 5))
+	filter := database.SeriesFilter{
+		Limit:     parseInt(q.Get("limit"), 20),
+		Page:      parseInt(q.Get("page"), 1),
+		QueryTerm: query,
+	}
+	series, totalCount, _ := h.db.ListSeries(filter)
+	if series == nil {
+		series = []models.Series{}
+	}
+
+	data := map[string]interface{}{
+		"series_count": totalCount,
+		"limit":        filter.Limit,
+		"page_number":  filter.Page,
+		"series":       series,
+		"synced_count": len(synced),
+	}
+	if syncErr != nil {
+		data["sync_error"] = syncErr.Error()
+	}
 	writeSuccess(w, data)
 }
 

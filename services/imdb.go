@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -164,6 +165,35 @@ func (s *IMDBService) FetchTitle(imdbID string) (*IMDBTitle, error) {
 		return nil, err
 	}
 	return &title, nil
+}
+
+// IMDBSearchResponse is the shape returned by /search/titles
+type IMDBSearchResponse struct {
+	Titles []IMDBTitle `json:"titles"`
+}
+
+// SearchTitles queries imdbapi.dev /search/titles for a free-text query.
+// typeFilter is optional (e.g. "tvSeries", "movie") to narrow results.
+func (s *IMDBService) SearchTitles(query, typeFilter string) ([]IMDBTitle, error) {
+	u := imdbAPIBaseURL + "/search/titles?query=" + url.QueryEscape(query)
+	if typeFilter != "" {
+		u += "&type=" + url.QueryEscape(typeFilter)
+	}
+	resp, err := s.client.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("IMDB search returned %d", resp.StatusCode)
+	}
+
+	var out IMDBSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Titles, nil
 }
 
 // FetchCredits gets cast and crew

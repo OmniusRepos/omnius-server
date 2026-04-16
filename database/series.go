@@ -1,6 +1,8 @@
 package database
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm/clause"
@@ -8,21 +10,79 @@ import (
 	"torrent-server/models"
 )
 
-func (d *DB) ListSeries(limit, page int) ([]models.Series, int, error) {
-	if limit <= 0 || limit > 50 {
-		limit = 20
+type SeriesFilter struct {
+	Limit         int
+	Page          int
+	MinimumRating float32
+	QueryTerm     string
+	Genre         string
+	SortBy        string
+	OrderBy       string
+	Year          int
+	Status        string
+	Network       string
+}
+
+func (d *DB) ListSeries(filter SeriesFilter) ([]models.Series, int, error) {
+	if filter.Limit <= 0 || filter.Limit > 50 {
+		filter.Limit = 20
 	}
-	if page <= 0 {
-		page = 1
+	if filter.Page <= 0 {
+		filter.Page = 1
+	}
+	if filter.SortBy == "" {
+		filter.SortBy = "date_added"
+	}
+	if filter.OrderBy == "" {
+		filter.OrderBy = "desc"
+	}
+
+	query := d.Model(&models.Series{})
+
+	if filter.MinimumRating > 0 {
+		query = query.Where("rating >= ?", filter.MinimumRating)
+	}
+	if filter.QueryTerm != "" {
+		query = query.Where("title LIKE ? OR imdb_code = ?", "%"+filter.QueryTerm+"%", filter.QueryTerm)
+	}
+	if filter.Genre != "" {
+		query = query.Where("genres LIKE ?", "%"+filter.Genre+"%")
+	}
+	if filter.Year > 0 {
+		query = query.Where("year = ?", filter.Year)
+	}
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+	if filter.Network != "" {
+		query = query.Where("network = ?", filter.Network)
 	}
 
 	var totalCount int64
-	d.Model(&models.Series{}).Count(&totalCount)
+	if err := query.Count(&totalCount).Error; err != nil {
+		return nil, 0, err
+	}
 
-	offset := (page - 1) * limit
+	validSortColumns := map[string]string{
+		"title": "title", "year": "year", "rating": "rating",
+		"date_added": "date_added_unix",
+	}
+	sortCol, ok := validSortColumns[filter.SortBy]
+	if !ok {
+		sortCol = "date_added_unix"
+	}
+
+	orderDir := "DESC"
+	if strings.ToLower(filter.OrderBy) == "asc" {
+		orderDir = "ASC"
+	}
+
+	offset := (filter.Page - 1) * filter.Limit
+
 	var seriesList []models.Series
-	err := d.Order("date_added_unix DESC").
-		Limit(limit).
+	err := query.
+		Order(fmt.Sprintf("%s %s", sortCol, orderDir)).
+		Limit(filter.Limit).
 		Offset(offset).
 		Find(&seriesList).Error
 

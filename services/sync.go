@@ -84,6 +84,68 @@ func (s *SyncService) SearchAndSyncFromYTS(query string, max int) ([]models.Movi
 	return synced, nil
 }
 
+// SearchAndSyncSeries queries IMDB for tvSeries matching query, filters to those
+// with EZTV torrents, and syncs (+ refreshes) them. Cached per query like movies.
+// Returns the list of synced/updated series.
+func (s *SyncService) SearchAndSyncSeries(query string, max int) ([]models.Series, error) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return nil, nil
+	}
+	if max <= 0 {
+		max = 5
+	}
+
+	cacheKey := "series:" + q
+	s.searchCacheMu.Lock()
+	if t, ok := s.searchCache[cacheKey]; ok && time.Since(t) < searchCacheTTL {
+		s.searchCacheMu.Unlock()
+		return nil, nil
+	}
+	s.searchCache[cacheKey] = time.Now()
+	s.searchCacheMu.Unlock()
+
+	titles, err := s.imdb.SearchTitles(query, "tvSeries")
+	if err != nil {
+		return nil, err
+	}
+
+	synced := make([]models.Series, 0, max)
+	checked := 0
+	for _, t := range titles {
+		if len(synced) >= max {
+			break
+		}
+		// Cap total IMDB lookups to avoid unbounded EZTV probes
+		if checked >= max*3 {
+			break
+		}
+		checked++
+
+		imdbID := strings.TrimPrefix(t.ID, "tt")
+		eztvHits, _ := providers.FetchEZTVTorrents(imdbID)
+		if len(eztvHits) == 0 {
+			continue
+		}
+
+		series, err := s.SyncSeries(t.ID)
+		if err != nil {
+			log.Printf("[SearchAndSyncSeries] %s (%s) sync failed: %v", t.PrimaryTitle, t.ID, err)
+			continue
+		}
+		refreshed, err := s.RefreshSeries(series)
+		if err != nil {
+			log.Printf("[SearchAndSyncSeries] %s (%s) refresh failed: %v", t.PrimaryTitle, t.ID, err)
+			// Keep the basic entry even if refresh fails
+			synced = append(synced, *series)
+			continue
+		}
+		synced = append(synced, *refreshed)
+	}
+	log.Printf("[SearchAndSyncSeries] query=%q imdb_hits=%d synced=%d", query, len(titles), len(synced))
+	return synced, nil
+}
+
 // SyncMovie fetches metadata and torrents for a movie
 func (s *SyncService) SyncMovie(imdbCode string) (*models.Movie, error) {
 	s.mu.Lock()
@@ -241,7 +303,7 @@ func (s *SyncService) RefreshAllMovies() {
 func (s *SyncService) RefreshAllSeries() {
 	log.Println("Starting refresh all TV series...")
 
-	seriesList, _, err := s.db.ListSeries(1000, 1)
+	seriesList, _, err := s.db.ListSeries(database.SeriesFilter{Limit: 1000, Page: 1})
 	if err != nil {
 		log.Printf("Failed to list series: %v", err)
 		return

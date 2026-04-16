@@ -516,8 +516,8 @@ func (h *APIHandler) UnifiedSearch(w http.ResponseWriter, r *http.Request) {
 		movies = []models.Movie{}
 	}
 
-	// Search series
-	series, _, _ := h.db.ListSeries(limit, 1)
+	// Search series (in-memory case-insensitive match below)
+	series, _, _ := h.db.ListSeries(database.SeriesFilter{Limit: limit, Page: 1})
 	var matchedSeries []models.Series
 	queryLower := strings.ToLower(query)
 	for _, s := range series {

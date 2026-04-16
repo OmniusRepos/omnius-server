@@ -34,7 +34,7 @@ func (h *AdminHandler) SetTemplates(t *template.Template) {
 // Dashboard handles GET /admin
 func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	movies, movieCount, _ := h.db.ListMovies(database.MovieFilter{Limit: 50, Page: 1})
-	series, seriesCount, _ := h.db.ListSeries(50, 1)
+	series, seriesCount, _ := h.db.ListSeries(database.SeriesFilter{Limit: 50, Page: 1})
 
 	data := map[string]interface{}{
 		"Movies":      movies,

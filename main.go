@@ -195,6 +195,7 @@ func main() {
 
 	// Initialize series handler
 	seriesHandler := handlers.NewSeriesHandler(db)
+	seriesHandler.SetSyncService(syncService)
 
 	// Initialize curated handler
 	curatedHandler := handlers.NewCuratedHandler(db)
@@ -229,6 +230,7 @@ func main() {
 
 		// Series
 		r.Get("/list_series.json", seriesHandler.ListSeries)
+		r.Get("/search_series_online.json", seriesHandler.SearchSeriesOnline)
 		r.Get("/series_details.json", seriesHandler.SeriesDetails)
 		r.Get("/season_episodes.json", seriesHandler.SeasonEpisodes)
 
@@ -814,7 +816,7 @@ func main() {
 			// Stats API
 			r.Get("/api/stats", func(w http.ResponseWriter, r *http.Request) {
 				_, movieCount, _ := db.ListMovies(database.MovieFilter{Limit: 1, Page: 1})
-				_, seriesCount, _ := db.ListSeries(1, 1)
+				_, seriesCount, _ := db.ListSeries(database.SeriesFilter{Limit: 1, Page: 1})
 				torrentStats := torrentService.GetStats()
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]interface{}{
